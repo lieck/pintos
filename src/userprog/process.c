@@ -50,6 +50,7 @@ void userprog_init(void) {
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
+/* 创建线程运行 file_name, 返回创建线程的 pid */
 pid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
@@ -264,6 +265,80 @@ static bool validate_segment(const struct Elf32_Phdr*, struct file*);
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable);
 
+// 初始化 stack frame
+// TODO 未测试
+char* init_stack_frame(const char* name, char* stack) {
+  // 解析 file_name, 例如 ls -ahl
+  char command[20][30];
+  memset(command, 0, sizeof command);
+
+  size_t cnt = 0;
+  bool new_command = true;
+  size_t idx = 0;
+  for(size_t i = 0; name[i] != 0; i++) {
+    if(name[i] == ' ') {
+      new_command = true;
+      continue;
+    }
+
+    if(new_command) {
+      idx = 0;
+      cnt++;
+      new_command = false;
+    }
+
+    command[cnt - 1][idx++] = name[i];
+  }
+
+  char frame[600];
+
+  size_t *header = frame;
+  size_t header_size = (3 + cnt + 1) * sizeof(size_t);
+  // return address
+  header[0] = 0;
+  // argc
+  header[1] = cnt;
+  // argv
+  header[2] = sizeof(size_t) * 3;
+
+  char *argv = frame + header_size;
+  size_t argv_idx = 0;
+  // argv[0...]
+  for(size_t i = 0; i < cnt; i++) {
+    // argv point
+    header[i + 3] = header_size + argv_idx;
+
+    for(size_t j = 0; ; j++) {
+      argv[argv_idx++] = command[i][j];
+      if(command[i][j] == '\0') {
+        break;
+      }
+    }
+  }
+
+  // argc + argv + cnt
+  header[cnt + 3] = 0;
+
+  // frame size, 16字节对齐
+  // TODO BUG!!!!
+  size_t frame_size = header_size + argv_idx + 15;
+  frame_size -= frame_size % 16;
+  frame_size += 4;
+
+  stack -= frame_size;
+
+  // 更新 argc point
+  for(int i = 0; i <= cnt; i++) {
+    header[i + 2] += (size_t)stack;
+  } 
+
+  // 复制到 stack 中
+  memcpy(stack, frame, frame_size);
+
+  return stack;
+}
+
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
@@ -350,6 +425,9 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   /* Set up stack. */
   if (!setup_stack(esp))
     goto done;
+
+  /* TODO(pro1) load command */
+  *esp = init_stack_frame(file_name, *esp);
 
   /* Start address. */
   *eip = (void (*)(void))ehdr.e_entry;
@@ -473,7 +551,7 @@ static bool setup_stack(void** esp) {
   if (kpage != NULL) {
     success = install_page(((uint8_t*)PHYS_BASE) - PGSIZE, kpage, true);
     if (success)
-      *esp = PHYS_BASE - 16;
+      *esp = PHYS_BASE;
     else
       palloc_free_page(kpage);
   }
