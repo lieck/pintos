@@ -187,8 +187,19 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   if (t == NULL)
     return TID_ERROR;
 
+  // TODO(p1-argument passing) name 可能由多个字符串构成, thread name 只取第一个字符串
+  // 例如 name = "stack-align-3 a b" 的 thread name 为 "stack-align-3"
+  // 这里限制 name 最大为 100，如果需要更改则还要改后面的调用
+  ASSERT(strlen(name) < 100);
+  char thread_name[100];
+  size_t split_idx = 0;
+  while(name[split_idx] != ' ' && name[split_idx] != '/0')
+    split_idx++;
+  memcpy(thread_name, name, split_idx);
+  thread_name[split_idx] = '\0';
+
   /* Initialize thread. */
-  init_thread(t, name, priority);
+  init_thread(t, thread_name, priority);
   tid = t->tid = allocate_tid();
 
   /* Stack frame for kernel_thread(). */
