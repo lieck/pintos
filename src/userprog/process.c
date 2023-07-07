@@ -426,7 +426,7 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   if (!setup_stack(esp))
     goto done;
 
-  /* TODO(pro1) load command */
+  /* TODO(pro1-argument passing) load command */
   *esp = init_stack_frame(file_name, *esp);
 
   /* Start address. */

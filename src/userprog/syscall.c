@@ -28,77 +28,90 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     process_exit();
   }
 
-  switch (args[0])
-  {
-    
-  case SYS_PRACTICE:
-    f->eax = args[1] + 1;
-    break;
-  
-  default:
-    break;
-  }
-
-
-  // TODO(pro1 File Operation Syscalls)
+  // TODO(p1-process control syscalls)
   switch (args[0]) {
-  case SYS_CREATE:
-    f->eax = sys_create(args[1], args[2]);
-    break;
-  case SYS_REMOVE:
-    f->eax = sys_remove(args[1]);
-    break;
-  case SYS_OPEN:
-    f->eax = sys_open(args[1]);
-    break;
-  case SYS_READ:
-    f->eax = sys_read(args[1], args[2], args[3]);
-    break;
-  case SYS_FILESIZE:
-    f->eax = sys_filesize(args[1]);
-    break;
-  case SYS_WRITE:
-    f->eax = sys_write(args[1], args[2], args[3]);
-    break;
-  case SYS_SEEK:
-    sys_seek(args[1], args[2]);
-    break;
-  case SYS_TELL:
-    f->eax = sys_tell(args[1]);
-    break;
-  case SYS_CLOSE:
-    sys_close(args[1]);
-    break;
-  default:
-    break;
+    case SYS_PRACTICE:
+      f->eax = sys_practice(args[1]);
+      break;
+    case SYS_HALT:
+      sys_halt();
+      break;
+    case SYS_EXIT:
+      // sys_exit(args[1]);
+      break;
+    case SYS_EXEC:
+      f->eax = sys_exec(args[1]);
+      break;
+    case SYS_WAIT:
+      f->eax = sys_wait(args[1]);
+      break;
+    default:
+      break;
+  }
+
+  // TODO(p1-file operation syscalls)
+  switch (args[0]) {
+    case SYS_CREATE:
+      f->eax = sys_create(args[1], args[2]);
+      break;
+    case SYS_REMOVE:
+      f->eax = sys_remove(args[1]);
+      break;
+    case SYS_OPEN:
+      f->eax = sys_open(args[1]);
+      break;
+    case SYS_READ:
+      f->eax = sys_read(args[1], args[2], args[3]);
+      break;
+    case SYS_FILESIZE:
+      f->eax = sys_filesize(args[1]);
+      break;
+    case SYS_WRITE:
+      f->eax = sys_write(args[1], args[2], args[3]);
+      break;
+    case SYS_SEEK:
+      sys_seek(args[1], args[2]);
+      break;
+    case SYS_TELL:
+      f->eax = sys_tell(args[1]);
+      break;
+    case SYS_CLOSE:
+      sys_close(args[1]);
+      break;
+    default:
+      break;
   }
 }
 
+int sys_practice(int i) { return i + 1; }
 
-int sys_create(const char *file, unsigned initial_size) {
-  return filesys_open(file, initial_size);
-}
+void sys_halt(void) {}
 
-int sys_remove(const char *file) {
-  return filesys_remove(file);
-}
+void sys_exit(int status) {}
+
+pid_t sys_exec(const char* cmd_line) {}
+
+int sys_wait(pid_t pid) {}
+
+int sys_create(const char* file, unsigned initial_size) { return filesys_open(file, initial_size); }
+
+int sys_remove(const char* file) { return filesys_remove(file); }
 
 int sys_open(const char* file) {}
 
 int sys_filesize(int fd) {}
 
-int sys_read (int fd, void *buffer, unsigned size) {}
+int sys_read(int fd, void* buffer, unsigned size) {}
 
-int sys_write (int fd, const void *buffer, unsigned size) {
-  if(fd == 1) {
+int sys_write(int fd, const void* buffer, unsigned size) {
+  if (fd == 1) {
     printf("%s", buffer);
     return 0;
   }
-
 }
 
-void sys_seek (int fd, unsigned position) {}
+void sys_seek(int fd, unsigned position) {}
 
-unsigned sys_tell(int fd){}
+unsigned sys_tell(int fd) {}
 
-void sys_close (int fd){}
+void sys_close(int fd) {}
