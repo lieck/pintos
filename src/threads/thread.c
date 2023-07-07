@@ -193,7 +193,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   ASSERT(strlen(name) < 100);
   char thread_name[100];
   size_t split_idx = 0;
-  while(name[split_idx] != ' ' && name[split_idx] != '/0')
+  while(name[split_idx] != ' ' && name[split_idx] != '\0')
     split_idx++;
   memcpy(thread_name, name, split_idx);
   thread_name[split_idx] = '\0';

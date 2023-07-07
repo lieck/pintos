@@ -360,10 +360,10 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   /* Open executable file. */
   // TODO(p1-argument passing) 对于 stack-align-2 a 的参数需要解析为 stack-align-2
   size_t split_idx = 0;
-  while(file_name[split_idx] != ' ' && file_name[split_idx] != '/0')
+  while(file_name[split_idx] != ' ' && file_name[split_idx] != '\0')
     split_idx++;
-  char *command[100];
-  memcpy(command, file_name, split_idx);
+  char command[100];
+  memcpy(&command, file_name, split_idx);
   command[split_idx] = '\0';
 
   file = filesys_open(command);
