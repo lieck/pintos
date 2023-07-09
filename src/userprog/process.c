@@ -319,7 +319,6 @@ char* init_stack_frame(const char* name, char* stack) {
   // 解析 file_name, 例如 ls -ahl
   size_t name_len = strlen(name) + 1;
 
-  
   // 获取去除了空格之后的name
   char* new_name = remove_extra_spaces(name);
 
