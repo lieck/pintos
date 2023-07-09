@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -269,73 +270,43 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
 // TODO 未测试
 char* init_stack_frame(const char* name, char* stack) {
   // 解析 file_name, 例如 ls -ahl
-  char command[20][30];
-  memset(command, 0, sizeof command);
+  size_t name_len = strlen(name) + 1;
+  // 空间对齐后参数们所需要的空间
+  size_t argument_string_memory = (name_len / 4 + (name_len % 4 ? 1 : 0)) * 4;
+  // 拷贝到栈上
+  memcpy(stack - name_len, name, name_len);
+  memset(stack - argument_string_memory, 0, argument_string_memory - name_len);
 
-  size_t cnt = 0;
-  bool new_command = true;
-  size_t idx = 0;
-  for(size_t i = 0; name[i] != 0; i++) {
-    if(name[i] == ' ') {
-      new_command = true;
-      continue;
-    }
-
-    if(new_command) {
-      idx = 0;
-      cnt++;
-      new_command = false;
-    }
-
-    command[cnt - 1][idx++] = name[i];
-  }
-
-  char frame[600];
-
-  size_t *header = frame;
-  size_t header_size = (3 + cnt + 1) * sizeof(size_t);
-  // return address
-  header[0] = 0;
-  // argc
-  header[1] = cnt;
-  // argv
-  header[2] = sizeof(size_t) * 3;
-
-  char *argv = frame + header_size;
-  size_t argv_idx = 0;
-  // argv[0...]
-  for(size_t i = 0; i < cnt; i++) {
-    // argv point
-    header[i + 3] = header_size + argv_idx;
-
-    for(size_t j = 0; ; j++) {
-      argv[argv_idx++] = command[i][j];
-      if(command[i][j] == '\0') {
-        break;
-      }
+  size_t argument_count = 1;
+  char* argument_idx_offset[30] = {[0] = stack - name_len}; // 最多三十个参数 TODO: 参数个数的预估方法
+  // 将 ' ' 替换为 '\0' (ls -alh -> ls\0lalh), 同时统计参数个数及其偏移
+  for (size_t idx = 0; idx < name_len - 1 /* 防止最后一个'\0'被统计 */; ++idx) {
+    char* currunt_position = stack + idx - name_len;
+    if (*currunt_position == ' ') {
+      *currunt_position = '\0';
+      if (idx + 1 < name_len - 1 && *(currunt_position + 1) != '\0') // TODO: 应该在入参处去除重复的多余的空格
+        argument_idx_offset[argument_count++] = currunt_position + 1;
     }
   }
+  argument_idx_offset[argument_count++] = 0; // 保护位, 可以舍弃
+  // 设置指向各个参数字符数组的指针
+  size_t point_argument_memory_len = sizeof(char*) * argument_count;
+  char* point_argument_memory_start = stack - argument_string_memory - point_argument_memory_len;
+  memcpy(point_argument_memory_start, argument_idx_offset, point_argument_memory_len);
 
-  // argc + argv + cnt
-  header[cnt + 3] = 0;
+  void** return_argc_argv = point_argument_memory_start - sizeof(void*) * 3; // sizeof(int) == sizeof(void*) 所以  argc 也在这里一起处理了
+  size_t mem_to_align = (size_t)return_argc_argv % 16 + 4;
+  if (mem_to_align == 16) mem_to_align = 0;
+  return_argc_argv -= mem_to_align / sizeof(void*); // Align to 0xc
+  if (mem_to_align > 0) {
+    memset(return_argc_argv + 3, 0, mem_to_align);
+  }
 
-  // frame size, 16字节对齐
-  // TODO BUG!!!!
-  size_t frame_size = header_size + argv_idx + 15;
-  frame_size -= frame_size % 16;
-  frame_size += 4;
+  return_argc_argv[2] = point_argument_memory_start; // argv
+  return_argc_argv[1] = (void*)argument_count - 1; // argc
+  return_argc_argv[0] = 0; // return address
 
-  stack -= frame_size;
-
-  // 更新 argc point
-  for(int i = 0; i <= cnt; i++) {
-    header[i + 2] += (size_t)stack;
-  } 
-
-  // 复制到 stack 中
-  memcpy(stack, frame, frame_size);
-
-  return stack;
+  return return_argc_argv;
 }
 
 
