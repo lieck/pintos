@@ -295,10 +295,11 @@ static bool validate_segment(const struct Elf32_Phdr*, struct file*);
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable);
 
-// TODO: 去除参数中多余的空格
+// 去除参数中多余的空格
+// 通过args-*的测试
 char* remove_extra_spaces(const char* name) {
   char* new_name = (char*)malloc(strlen(name) + 1);
-  int i, j, k;
+  int i, j;
   for (i = 0, j = 0; name[i] != '\0'; i++) {
     if (name[i] != ' ') {
       new_name[j++] = name[i];
@@ -318,6 +319,8 @@ char* init_stack_frame(const char* name, char* stack) {
   // 解析 file_name, 例如 ls -ahl
   size_t name_len = strlen(name) + 1;
 
+  
+  // 获取去除了空格之后的name
   char* new_name = remove_extra_spaces(name);
 
   name_len = strlen(new_name) + 1;
