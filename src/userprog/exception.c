@@ -1,5 +1,6 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include "userprog/gdt.h"
 #include "userprog/process.h"
@@ -141,5 +142,11 @@ static void page_fault(struct intr_frame* f) {
   printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
          not_present ? "not present" : "rights violation", write ? "writing" : "reading",
          user ? "user" : "kernel");
-  kill(f);
+  if (user)
+    kill(f);
+
+  /* Accessing user memory | Pintos Documentation https://cs162.org/static/proj/pintos-docs/docs/userprog/accessing-user-mem/
+     a page fault in the kernel merely sets eax to 0xffffffff and copies its former value into eip */
+  f->eip = (void*)f->eax; // 设置pc, 恢复执行
+  f->eax = 0xffffffff; // 返回值(-1)
 }
