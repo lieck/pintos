@@ -284,7 +284,7 @@ char* init_stack_frame(const char* name, char* stack) {
     char* currunt_position = stack + idx - name_len;
     if (*currunt_position == ' ') {
       *currunt_position = '\0';
-      if (idx + 1 < name_len - 1 && *(currunt_position + 1) != '\0') // TODO: 应该在入参处去除重复的多余的空格
+      if (idx + 1 < name_len - 1 && *(currunt_position + 1) != ' ') // TODO: 应该在入参处去除重复的多余的空格
         argument_idx_offset[argument_count++] = currunt_position + 1;
     }
   }
