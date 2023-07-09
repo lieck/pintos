@@ -202,6 +202,20 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   init_thread(t, thread_name, priority);
   tid = t->tid = allocate_tid();
 
+  // TODO(p1-sycall)
+  // 添加子进程信息到父进程中
+  struct thread *curr = thread_current();
+  if(curr->tid >= 3)
+    t->parent = curr;
+  for(size_t i = 0; i <= EXIT_STATUS_NUM; i++) {
+    ASSERT(i != EXIT_STATUS_NUM);
+    if(curr->child_exit_status[i].tid == 0) {
+      curr->child_exit_status[i].tid = tid;
+      curr->child_exit_status[i].t = t;
+      break;
+    }
+  }
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame(t, sizeof *kf);
   kf->eip = NULL;
@@ -445,6 +459,11 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
   intr_set_level(old_level);
+
+  // TODO(p1-syscall)
+  t->parent = NULL;
+  memset(t->child_exit_status, 0, sizeof t->child_exit_status);
+  sema_init(&t->chile_sema, 1);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -575,3 +594,15 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
+
+// 搜索是否存在对应的子进程，如果没有返回 EXIT_STATUS_NUM
+size_t get_child(struct thread* t, tid_t tid) {
+  size_t idx = EXIT_STATUS_NUM;
+  for(size_t i = 0; i < EXIT_STATUS_NUM; i++) {
+    if (t->child_exit_status[i].tid == tid) {
+      idx = i;
+      break;
+    }
+  }
+  return idx;
+}

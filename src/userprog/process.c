@@ -21,7 +21,9 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+// 该信号量用于控制 Pintos 的退出
 static struct semaphore temporary;
+
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
@@ -56,7 +58,13 @@ pid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
 
-  sema_init(&temporary, 0);
+  // 第一次调用时，初始化信号量为 0
+  static bool init = false;
+  if(!init) {
+    init = true;
+    sema_init(&temporary, 0);
+  }
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
@@ -117,7 +125,23 @@ static void start_process(void* file_name_) {
   /* Clean up. Exit on failure or jump to userspace */
   palloc_free_page(file_name);
   if (!success) {
-    sema_up(&temporary);
+    
+    // TODO(p1-exec call) 只允许3号进程退出，具体原因见文档
+    // 可能有更优美的处理方式？
+    if(t->tid == 3) {
+      sema_up(&temporary);
+    }
+
+    // 唤醒父进程，并设置退出的状态
+    // 当前父进程一定处于调用 sys_exec 的状态
+    if(t->parent != NULL) {
+      size_t idx = get_child(t->parent, t->tid);
+      ASSERT(idx < EXIT_STATUS_NUM);
+      t->parent->child_exit_status[idx].t = NULL;
+      t->parent->child_exit_status[idx].exit_status = -1;
+      sema_up(&t->parent->chile_sema);
+    }
+
     thread_exit();
   }
 
@@ -180,7 +204,12 @@ void process_exit(void) {
   cur->pcb = NULL;
   free(pcb_to_free);
 
-  sema_up(&temporary);
+  // TODO(p1-exec call) 当 tid 为 3 的进程退出时，可以退出 pintos
+  // 有更加优美的解决方法
+  if(cur->tid == 3) {
+    sema_up(&temporary);
+  }
+
   thread_exit();
 }
 
@@ -267,7 +296,6 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
                          uint32_t zero_bytes, bool writable);
 
 // 初始化 stack frame
-// TODO 未测试
 char* init_stack_frame(const char* name, char* stack) {
   // 解析 file_name, 例如 ls -ahl
   size_t name_len = strlen(name) + 1;
