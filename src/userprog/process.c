@@ -119,9 +119,9 @@ static void start_process(void* file_name_) {
     // 解析参数
     // TODO(p1-argument passing) 对于 stack-align-2 a 的参数需要解析为 stack-align-2
     size_t split_idx = 0;
-    while(file_name[split_idx] != ' ' && file_name[split_idx] != '\0')
+    while (file_name[split_idx] != ' ' && file_name[split_idx] != '\0')
       split_idx++;
-    char *elf_file_name = malloc(sizeof(char) * (split_idx + 1));
+    char* elf_file_name = malloc(sizeof(char) * (split_idx + 1));
     memcpy(elf_file_name, file_name, split_idx);
     elf_file_name[split_idx] = '\0';
 
@@ -129,9 +129,9 @@ static void start_process(void* file_name_) {
     lock_acquire(&sys_file_lock);
     success = load(file_name, &if_.eip, &if_.esp);
 
-    if(success) {
-      for(size_t i = 0; i < MAX_THREADS; i++) {
-        if(elf_file_set[i] == NULL) {
+    if (success) {
+      for (size_t i = 0; i < MAX_THREADS; i++) {
+        if (elf_file_set[i] == NULL) {
           elf_file_set[i] = elf_file_name;
           t->pcb->elf_file_idx = i;
           break;
@@ -178,7 +178,7 @@ static void start_process(void* file_name_) {
     thread_exit();
   }
 
-  if(t->parent != NULL) {
+  if (t->parent != NULL) {
     sema_up(&t->parent->chile_sema);
   }
 
@@ -364,6 +364,9 @@ char* init_stack_frame(const char* name, char* stack) {
   size_t argument_string_memory = (name_len / 4 + (name_len % 4 ? 1 : 0)) * 4;
   // 拷贝到栈上
   memcpy(stack - name_len, new_name, name_len);
+
+  free(new_name);
+  
   memset(stack - argument_string_memory, 0, argument_string_memory - name_len);
 
   size_t argument_count = 1;
@@ -713,10 +716,10 @@ void pthread_exit(void) {}
    now, it does nothing. */
 void pthread_exit_main(void) {}
 
-
 size_t get_fd(struct process* p, int fd) {
-  for(size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
-    if(p->fd_table[i].fd == fd) return i;
+  for (size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
+    if (p->fd_table[i].fd == fd)
+      return i;
   }
   return MAX_OPEN_FILE_SIZE;
 }
