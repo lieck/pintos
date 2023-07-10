@@ -64,7 +64,7 @@ void pthread_exit_main(void);
 size_t get_fd(struct process*, int fd);
 
 // 文件系统调用的锁
-static struct lock sys_file_lock;
+struct lock sys_file_lock;
 
 // 正在执行的 ELF 文件集合
 static char *elf_file_set[MAX_THREADS];

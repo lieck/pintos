@@ -22,7 +22,6 @@ static void check_num32(uint8_t* ptr);
 
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); 
-  lock_init(&sys_file_lock);
 }
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
@@ -209,7 +208,7 @@ int sys_create(const char* file, unsigned initial_size) {
   check_str(file);
 
   lock_acquire(&sys_file_lock);
-  int ret = filesys_open(file, initial_size);
+  int ret = filesys_create(file, initial_size);
   lock_release(&sys_file_lock);
   return ret;
 }
@@ -309,7 +308,7 @@ int sys_write(int fd, const void* buffer, unsigned size) {
 
   if (fd == 1) {
     printf("%s", buffer);
-    return 0;
+    return strlen(buffer);
   }
 
   struct process *p = thread_current()->pcb;
@@ -322,7 +321,15 @@ int sys_write(int fd, const void* buffer, unsigned size) {
 
   // 判断是否为正在执行的 ELF 文件
   for(size_t i = 0; i < MAX_THREADS; i++) {
-    if(memcmp(elf_file_set[i], buffer, size) == 0) {
+    if(elf_file_set[i] == NULL)
+      continue;
+
+    size_t a = strlen(elf_file_set[i]);
+    size_t b = strlen(p->fd_table[idx].file_name);
+
+    if(a != b) continue;
+
+    if(memcmp(elf_file_set[i], p->fd_table[idx].file_name, a) == 0) {
       lock_release(&sys_file_lock);
       return -1;
     }

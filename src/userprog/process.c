@@ -64,7 +64,7 @@ pid_t process_execute(const char* file_name) {
   if(!init) {
     init = true;
     sema_init(&temporary, 0);
-    
+    lock_init(&sys_file_lock);
   }
 
   /* Make a copy of FILE_NAME.
@@ -126,7 +126,7 @@ static void start_process(void* file_name_) {
     elf_file_name[split_idx] = '\0';
 
     // 保护可执行文件
-    // lock_acquire(&sys_file_lock);
+    lock_acquire(&sys_file_lock);
     success = load(file_name, &if_.eip, &if_.esp);
 
     if(success) {
@@ -142,7 +142,7 @@ static void start_process(void* file_name_) {
       free(elf_file_name);
     }
 
-    // lock_release(&sys_file_lock);
+    lock_release(&sys_file_lock);
   }
 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
@@ -207,7 +207,7 @@ int process_wait(pid_t child_pid UNUSED) {
 }
 
 /* Free the current process's resources. */
-void process_exit(void) {
+void process_exit() {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
