@@ -61,7 +61,7 @@ pid_t process_execute(const char* file_name) {
 
   // 第一次调用时，初始化 process 相关
   static bool init = false;
-  if(!init) {
+  if (!init) {
     init = true;
     sema_init(&temporary, 0);
     
@@ -158,16 +158,16 @@ static void start_process(void* file_name_) {
   /* Clean up. Exit on failure or jump to userspace */
   palloc_free_page(file_name);
   if (!success) {
-    
+
     // TODO(p1-exec call) 只允许3号进程退出，具体原因见文档
     // 可能有更优美的处理方式？
-    if(t->tid == 3) {
+    if (t->tid == 3) {
       sema_up(&temporary);
     }
 
     // 唤醒父进程，并设置退出的状态
     // 当前父进程一定处于调用 sys_exec 的状态
-    if(t->parent != NULL) {
+    if (t->parent != NULL) {
       size_t idx = get_child(t->parent, t->tid);
       ASSERT(idx < EXIT_STATUS_NUM);
       t->parent->child_exit_status[idx].t = NULL;
@@ -242,7 +242,7 @@ void process_exit(void) {
   free(pcb_to_free);
 
   // TODO(p1-exec call) 当 tid 为 3 的进程退出时，可以退出 pintos
-  if(cur->tid == 3) {
+  if (cur->tid == 3) {
     sema_up(&temporary);
   }
 
@@ -331,24 +331,51 @@ static bool validate_segment(const struct Elf32_Phdr*, struct file*);
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable);
 
+// 去除参数中多余的空格
+// 通过args-*的测试
+char* remove_extra_spaces(const char* name) {
+  char* new_name = (char*)malloc(strlen(name) + 1);
+  int i, j;
+  for (i = 0, j = 0; name[i] != '\0'; i++) {
+    if (name[i] != ' ') {
+      new_name[j++] = name[i];
+    } else if (j > 0 && new_name[j - 1] != ' ') {
+      new_name[j++] = ' ';
+    }
+  }
+  if (j > 0 && new_name[j - 1] == ' ') {
+    j--;
+  }
+  new_name[j] = '\0';
+  return new_name;
+}
+
 // 初始化 stack frame
 char* init_stack_frame(const char* name, char* stack) {
   // 解析 file_name, 例如 ls -ahl
   size_t name_len = strlen(name) + 1;
+
+  // 获取去除了空格之后的name
+  char* new_name = remove_extra_spaces(name);
+
+  name_len = strlen(new_name) + 1;
+
   // 空间对齐后参数们所需要的空间
   size_t argument_string_memory = (name_len / 4 + (name_len % 4 ? 1 : 0)) * 4;
   // 拷贝到栈上
-  memcpy(stack - name_len, name, name_len);
+  memcpy(stack - name_len, new_name, name_len);
   memset(stack - argument_string_memory, 0, argument_string_memory - name_len);
 
   size_t argument_count = 1;
-  char* argument_idx_offset[30] = {[0] = stack - name_len}; // 最多三十个参数 TODO: 参数个数的预估方法
+  char* argument_idx_offset[30] = {[0] =
+                                       stack - name_len}; // 最多三十个参数 TODO: 参数个数的预估方法
   // 将 ' ' 替换为 '\0' (ls -alh -> ls\0lalh), 同时统计参数个数及其偏移
   for (size_t idx = 0; idx < name_len - 1 /* 防止最后一个'\0'被统计 */; ++idx) {
     char* currunt_position = stack + idx - name_len;
     if (*currunt_position == ' ') {
       *currunt_position = '\0';
-      if (idx + 1 < name_len - 1 && *(currunt_position + 1) != ' ') // TODO: 应该在入参处去除重复的多余的空格
+      if (idx + 1 < name_len - 1 &&
+          *(currunt_position + 1) != ' ') // TODO: 应该在入参处去除重复的多余的空格
         argument_idx_offset[argument_count++] = currunt_position + 1;
     }
   }
@@ -358,21 +385,23 @@ char* init_stack_frame(const char* name, char* stack) {
   char* point_argument_memory_start = stack - argument_string_memory - point_argument_memory_len;
   memcpy(point_argument_memory_start, argument_idx_offset, point_argument_memory_len);
 
-  void** return_argc_argv = point_argument_memory_start - sizeof(void*) * 3; // sizeof(int) == sizeof(void*) 所以  argc 也在这里一起处理了
+  void** return_argc_argv =
+      point_argument_memory_start -
+      sizeof(void*) * 3; // sizeof(int) == sizeof(void*) 所以  argc 也在这里一起处理了
   size_t mem_to_align = (size_t)return_argc_argv % 16 + 4;
-  if (mem_to_align == 16) mem_to_align = 0;
+  if (mem_to_align == 16)
+    mem_to_align = 0;
   return_argc_argv -= mem_to_align / sizeof(void*); // Align to 0xc
   if (mem_to_align > 0) {
     memset(return_argc_argv + 3, 0, mem_to_align);
   }
 
   return_argc_argv[2] = point_argument_memory_start; // argv
-  return_argc_argv[1] = (void*)argument_count - 1; // argc
-  return_argc_argv[0] = 0; // return address
+  return_argc_argv[1] = (void*)argument_count - 1;   // argc
+  return_argc_argv[0] = 0;                           // return address
 
   return return_argc_argv;
 }
-
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
@@ -395,7 +424,7 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   /* Open executable file. */
   // TODO(p1-argument passing) 对于 stack-align-2 a 的参数需要解析为 stack-align-2
   size_t split_idx = 0;
-  while(file_name[split_idx] != ' ' && file_name[split_idx] != '\0')
+  while (file_name[split_idx] != ' ' && file_name[split_idx] != '\0')
     split_idx++;
   char command[100];
   memcpy(&command, file_name, split_idx);
