@@ -463,7 +463,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   // TODO(p1-syscall)
   t->parent = NULL;
   memset(t->child_exit_status, 0, sizeof t->child_exit_status);
-  sema_init(&t->chile_sema, 1);
+  sema_init(&t->chile_sema, 0);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
