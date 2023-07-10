@@ -20,7 +20,9 @@ static int get_user(const uint8_t* uaddr);
 static void check_str(const char* ptr);
 static void check_num32(uint8_t* ptr);
 
-void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
+void syscall_init(void) {
+  intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); 
+}
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
   uint32_t* args = ((uint32_t*)f->esp);
@@ -65,30 +67,45 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   // TODO(p1-file operation syscalls)
   switch (args[0]) {
     case SYS_CREATE:
+      check_num32(args + 1);
+      check_num32(args + 2);
       f->eax = sys_create(args[1], args[2]);
       break;
     case SYS_REMOVE:
+      check_num32(args + 1);
       f->eax = sys_remove(args[1]);
       break;
     case SYS_OPEN:
+      check_num32(args + 1);
       f->eax = sys_open(args[1]);
       break;
     case SYS_READ:
+      check_num32(args + 1);
+      check_num32(args + 2);
+      check_num32(args + 3);
       f->eax = sys_read(args[1], args[2], args[3]);
       break;
     case SYS_FILESIZE:
+      check_num32(args + 1);
       f->eax = sys_filesize(args[1]);
       break;
     case SYS_WRITE:
+      check_num32(args + 1);
+      check_num32(args + 2);
+      check_num32(args + 3);
       f->eax = sys_write(args[1], args[2], args[3]);
       break;
     case SYS_SEEK:
+      check_num32(args + 1);
+      check_num32(args + 2);
       sys_seek(args[1], args[2]);
       break;
     case SYS_TELL:
+      check_num32(args + 1);
       f->eax = sys_tell(args[1]);
       break;
     case SYS_CLOSE:
+      check_num32(args + 1);
       sys_close(args[1]);
       break;
     default:
@@ -123,6 +140,22 @@ void sys_exit(int status) {
     }
   }
 
+  // 取消保护 ELF 文件
+  ASSERT(t->pcb->elf_file_idx != MAX_THREADS);
+  lock_acquire(&sys_file_lock);
+
+  // 清理打开的文件集合
+  for (size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
+    if (t->pcb->fd_table[i].fd != 0) {
+      file_close(t->pcb->fd_table[i].file);
+      free(t->pcb->fd_table[i].file_name);
+    }
+  }
+
+  free(elf_file_set[t->pcb->elf_file_idx]);
+  elf_file_set[t->pcb->elf_file_idx] = NULL;
+  lock_release(&sys_file_lock);
+
   process_exit();
 }
 
@@ -154,7 +187,6 @@ int sys_wait(pid_t pid) {
   struct thread* t = thread_current();
 
   // TODO 因为没有实现用户态线程，因此这里的 pid 与 tid 一致
-
   size_t idx = get_child(t, pid);
 
   // pid 不为子进程或已经调用 wait
@@ -172,28 +204,182 @@ int sys_wait(pid_t pid) {
   } while (true);
 }
 
-int sys_create(const char* file, unsigned initial_size) { return filesys_open(file, initial_size); }
+int sys_create(const char* file, unsigned initial_size) {
+  check_str(file);
 
-int sys_remove(const char* file) { return filesys_remove(file); }
-
-int sys_open(const char* file) {}
-
-int sys_filesize(int fd) {}
-
-int sys_read(int fd, void* buffer, unsigned size) {}
-
-int sys_write(int fd, const void* buffer, unsigned size) {
-  if (fd == 1) {
-    printf("%s", buffer);
-    return 0;
-  }
+  lock_acquire(&sys_file_lock);
+  int ret = filesys_create(file, initial_size);
+  lock_release(&sys_file_lock);
+  return ret;
 }
 
-void sys_seek(int fd, unsigned position) {}
+int sys_remove(const char* file) {
+  check_str(file);
 
-unsigned sys_tell(int fd) {}
+  lock_acquire(&sys_file_lock);
+  int ret = filesys_remove(file);
+  lock_release(&sys_file_lock);
+  return ret;
+}
 
-void sys_close(int fd) {}
+// 打开文件并获取 file 存储到描述符表中
+// TODO 假如打开已经打开的文件应该如何处理？
+int sys_open(const char* file) {
+  check_str(file);
+
+  int fd = -1;
+  struct process *p = thread_current()->pcb;
+
+  // 获取下一个可用的描述符
+  int idx = MAX_OPEN_FILE_SIZE;
+  for(size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
+    if(p->fd_table[i].fd == 0) {
+      idx = i;
+      break;
+    }
+  }
+
+  if(idx == MAX_OPEN_FILE_SIZE) {
+    printf("sys_open MAX_OPEN_FILE_SIZE\n");
+    return -1;
+  }
+
+  lock_acquire(&sys_file_lock);
+
+  struct file *f = filesys_open(file);
+  if(f == NULL) {
+    lock_release(&sys_file_lock);
+    return fd;
+  }
+
+  // 选择下一个描述符
+  fd = p->next_fd++;
+  p->fd_table[idx].fd = fd;
+  p->fd_table[idx].file = f;
+
+  p->fd_table[idx].file_name = malloc(strlen(file) + 1);
+  memcpy(p->fd_table[idx].file_name, file, strlen(file) + 1);
+
+  lock_release(&sys_file_lock);
+  return fd;
+}
+
+int sys_filesize(int fd) {
+  struct process *p = thread_current()->pcb;
+  size_t idx = get_fd(p, fd); 
+  if(idx == MAX_OPEN_FILE_SIZE)
+    return -1;
+
+  lock_acquire(&sys_file_lock);
+  int result = file_length(p->fd_table[idx].file);
+  lock_release(&sys_file_lock);
+  return result;
+}
+
+int sys_read(int fd, void* buffer, unsigned size) {
+  check_str(buffer);
+
+  struct process *p = thread_current()->pcb;
+  size_t idx = get_fd(p, fd); 
+  if(idx == MAX_OPEN_FILE_SIZE)
+    return -1;
+  
+  struct file *f = p->fd_table[idx].file;
+  // TODO 是否有不需要临时缓存区的方法？
+  char *tem_buf = malloc(size * sizeof(char));
+
+  lock_acquire(&sys_file_lock);
+  int read_size = file_read(f, tem_buf, size);
+  lock_release(&sys_file_lock);
+
+  for(int i = 0; i  < read_size; i++) {
+    if(put_user(buffer + i, tem_buf[i])) {
+      free(tem_buf);
+      return -1;
+    }
+  }
+
+  free(tem_buf);
+  return read_size;
+}
+
+int sys_write(int fd, const void* buffer, unsigned size) {
+  check_str(buffer);
+
+  if (fd == 1) {
+    printf("%s", buffer);
+    return strlen(buffer);
+  }
+
+  struct process *p = thread_current()->pcb;
+  size_t idx = get_fd(p, fd); 
+  if(idx == MAX_OPEN_FILE_SIZE)
+    return -1;
+  
+  struct file *f = p->fd_table[idx].file;
+  lock_acquire(&sys_file_lock);
+
+  // 判断是否为正在执行的 ELF 文件
+  for(size_t i = 0; i < MAX_THREADS; i++) {
+    if(elf_file_set[i] == NULL)
+      continue;
+
+    size_t a = strlen(elf_file_set[i]);
+    size_t b = strlen(p->fd_table[idx].file_name);
+
+    if(a != b) continue;
+
+    if(memcmp(elf_file_set[i], p->fd_table[idx].file_name, a) == 0) {
+      lock_release(&sys_file_lock);
+      return -1;
+    }
+  }
+
+  int write_size = file_write(f, buffer, size);
+  lock_release(&sys_file_lock);
+  return write_size;
+}
+
+void sys_seek(int fd, unsigned position) {
+  struct process *p = thread_current()->pcb;
+  size_t idx = get_fd(p, fd); 
+  if(idx == MAX_OPEN_FILE_SIZE)
+    return;
+  
+  struct file *f = p->fd_table[idx].file;
+  
+  lock_acquire(&sys_file_lock);
+  file_seek(f, position);
+  lock_release(&sys_file_lock);
+}
+
+unsigned sys_tell(int fd) {
+  struct process *p = thread_current()->pcb;
+  size_t idx = get_fd(p, fd); 
+  if(idx == MAX_OPEN_FILE_SIZE)
+    return -1;
+  
+  lock_acquire(&sys_file_lock);
+  unsigned result = file_tell(p->fd_table[idx].file);
+  lock_release(&sys_file_lock);
+  return result;
+}
+
+void sys_close(int fd) {
+  struct process *p = thread_current()->pcb;
+  size_t idx = get_fd(p, fd); 
+  if(idx == MAX_OPEN_FILE_SIZE)
+    return;
+  
+  lock_acquire(&sys_file_lock);
+  file_close(p->fd_table[idx].file);  
+  lock_release(&sys_file_lock);
+
+  p->fd_table[idx].fd = 0;
+  p->fd_table[idx].file = NULL;
+  free(p->fd_table[idx].file_name);
+  p->fd_table[idx].file_name = NULL;
+}
 
 /* 校验 args 是否正确 */
 static void check_num32(uint8_t* ptr) {

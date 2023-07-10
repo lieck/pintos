@@ -7,6 +7,8 @@
 #include "threads/synch.h"
 #include "threads/fixed-point.h"
 
+#define USERPROG
+
 /* States in a thread's life cycle. */
 enum thread_status {
   THREAD_RUNNING, /* Running thread. */
@@ -119,7 +121,7 @@ struct thread {
   // TODP(p1-Process Control Syscalls)
   // 父进程
   struct thread* parent;
-
+  
   // 子进程的退出状态
   struct child_status child_exit_status[EXIT_STATUS_NUM];
 
