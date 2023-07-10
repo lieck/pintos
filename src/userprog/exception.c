@@ -139,14 +139,18 @@ static void page_fault(struct intr_frame* f) {
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* To implement virtual memory, delete the rest of the function
+  // TODO 对于 kernel 中的异常访问, 是否有更好的方法处理？ （例如当前在 kernel 中访问 *null 不会导致 kill）
+  if (user) {
+
+    /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
-         not_present ? "not present" : "rights violation", write ? "writing" : "reading",
-         user ? "user" : "kernel");
-  if (user)
+    printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+           not_present ? "not present" : "rights violation", write ? "writing" : "reading",
+           user ? "user" : "kernel");
+
     kill(f);
+  }
 
   /* Accessing user memory | Pintos Documentation https://cs162.org/static/proj/pintos-docs/docs/userprog/accessing-user-mem/
      a page fault in the kernel merely sets eax to 0xffffffff and copies its former value into eip */
