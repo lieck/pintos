@@ -67,6 +67,6 @@ size_t get_fd(struct process*, int fd);
 struct lock sys_file_lock;
 
 // 正在执行的 ELF 文件集合
-static char *elf_file_set[MAX_THREADS];
+char *elf_file_set[MAX_THREADS];
 
 #endif /* userprog/process.h */
