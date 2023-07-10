@@ -28,6 +28,7 @@ static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
+char* init_stack_frame(const char* name, char* stack);
 
 /* Initializes user programs in the system by ensuring the main
    thread has a minimal PCB so that it can execute and wait for
@@ -58,11 +59,12 @@ pid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
 
-  // 第一次调用时，初始化信号量为 0
+  // 第一次调用时，初始化 process 相关
   static bool init = false;
   if (!init) {
     init = true;
     sema_init(&temporary, 0);
+    lock_init(&sys_file_lock);
   }
 
   /* Make a copy of FILE_NAME.
@@ -93,6 +95,10 @@ static void start_process(void* file_name_) {
 
   /* Initialize process control block */
   if (success) {
+    memset(new_pcb->fd_table, 0, sizeof new_pcb->fd_table);
+    new_pcb->next_fd = 3;
+    new_pcb->elf_file_idx = MAX_THREADS;
+
     // Ensure that timer_interrupt() -> schedule() -> process_activate()
     // does not try to activate our uninitialized pagedir
     new_pcb->pagedir = NULL;
@@ -109,7 +115,34 @@ static void start_process(void* file_name_) {
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
+
+    // 解析参数
+    // TODO(p1-argument passing) 对于 stack-align-2 a 的参数需要解析为 stack-align-2
+    size_t split_idx = 0;
+    while (file_name[split_idx] != ' ' && file_name[split_idx] != '\0')
+      split_idx++;
+    char* elf_file_name = malloc(sizeof(char) * (split_idx + 1));
+    memcpy(elf_file_name, file_name, split_idx);
+    elf_file_name[split_idx] = '\0';
+
+    // 保护可执行文件
+    lock_acquire(&sys_file_lock);
     success = load(file_name, &if_.eip, &if_.esp);
+
+    if (success) {
+      for (size_t i = 0; i < MAX_THREADS; i++) {
+        if (elf_file_set[i] == NULL) {
+          elf_file_set[i] = elf_file_name;
+          t->pcb->elf_file_idx = i;
+          break;
+        }
+      }
+      ASSERT(new_pcb->elf_file_idx != MAX_THREADS);
+    } else {
+      free(elf_file_name);
+    }
+
+    lock_release(&sys_file_lock);
   }
 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
@@ -145,6 +178,10 @@ static void start_process(void* file_name_) {
     thread_exit();
   }
 
+  if (t->parent != NULL) {
+    sema_up(&t->parent->chile_sema);
+  }
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -170,7 +207,7 @@ int process_wait(pid_t child_pid UNUSED) {
 }
 
 /* Free the current process's resources. */
-void process_exit(void) {
+void process_exit() {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
@@ -205,7 +242,6 @@ void process_exit(void) {
   free(pcb_to_free);
 
   // TODO(p1-exec call) 当 tid 为 3 的进程退出时，可以退出 pintos
-  // 有更加优美的解决方法
   if (cur->tid == 3) {
     sema_up(&temporary);
   }
@@ -328,6 +364,9 @@ char* init_stack_frame(const char* name, char* stack) {
   size_t argument_string_memory = (name_len / 4 + (name_len % 4 ? 1 : 0)) * 4;
   // 拷贝到栈上
   memcpy(stack - name_len, new_name, name_len);
+
+  free(new_name);
+  
   memset(stack - argument_string_memory, 0, argument_string_memory - name_len);
 
   size_t argument_count = 1;
@@ -676,3 +715,11 @@ void pthread_exit(void) {}
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
 void pthread_exit_main(void) {}
+
+size_t get_fd(struct process* p, int fd) {
+  for (size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
+    if (p->fd_table[i].fd == fd)
+      return i;
+  }
+  return MAX_OPEN_FILE_SIZE;
+}
