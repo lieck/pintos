@@ -305,6 +305,10 @@ int sys_read(int fd, void* buffer, unsigned size) {
 int sys_write(int fd, const void* buffer, unsigned size) {
   check_str(buffer);
 
+  if (fd == 0) {
+    sys_exit(-1);
+  }
+
   if (fd == 1) {
     printf("%s", buffer);
     return strlen(buffer);
