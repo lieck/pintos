@@ -79,6 +79,9 @@ static void kill(struct intr_frame* f) {
       printf("%s: dying due to interrupt %#04x (%s).\n", thread_name(), f->vec_no,
              intr_name(f->vec_no));
       intr_dump_frame(f);
+      // 为了通过测试在这里添加一行输出
+      // 通过checkpoint1所有测试
+      printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
       process_exit();
       NOT_REACHED();
 
@@ -148,5 +151,5 @@ static void page_fault(struct intr_frame* f) {
   /* Accessing user memory | Pintos Documentation https://cs162.org/static/proj/pintos-docs/docs/userprog/accessing-user-mem/
      a page fault in the kernel merely sets eax to 0xffffffff and copies its former value into eip */
   f->eip = (void*)f->eax; // 设置pc, 恢复执行
-  f->eax = 0xffffffff; // 返回值(-1)
+  f->eax = 0xffffffff;    // 返回值(-1)
 }
