@@ -305,6 +305,10 @@ int sys_read(int fd, void* buffer, unsigned size) {
 int sys_write(int fd, const void* buffer, unsigned size) {
   check_str(buffer);
 
+  if (fd == 0) {
+    sys_exit(-1);
+  }
+
   if (fd == 1) {
     printf("%s", buffer);
     return strlen(buffer);
@@ -331,7 +335,8 @@ int sys_write(int fd, const void* buffer, unsigned size) {
 
     if (memcmp(elf_file_set[i], p->fd_table[idx].file_name, a) == 0) {
       lock_release(&sys_file_lock);
-      return -1;
+      // 似乎测试要求的是要返回0 通过rox-*
+      return 0;
     }
   }
 
