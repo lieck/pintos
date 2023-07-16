@@ -9,6 +9,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -134,6 +135,12 @@ static void start_process(void* file_name_) {
         if (elf_file_set[i] == NULL) {
           elf_file_set[i] = elf_file_name;
           t->pcb->elf_file_idx = i;
+          struct file* elf_file = filesys_open(elf_file_name);
+          if (elf_file != NULL) {
+            file_deny_write(elf_file);
+          } else {
+            printf("load: %s: open failed\n", elf_file_name);
+          }
           break;
         }
       }

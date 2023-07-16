@@ -24,7 +24,6 @@ typedef void (*stub_fun)(pthread_fun, void*);
 struct file_info {
    int fd;
    struct file *file;
-   const char *file_name;
 };
 
 /* The process control block for a given process. Since
