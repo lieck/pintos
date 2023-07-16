@@ -146,7 +146,6 @@ void sys_exit(int status) {
   for (size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
     if (t->pcb->fd_table[i].fd != 0) {
       file_close(t->pcb->fd_table[i].file);
-      free(t->pcb->fd_table[i].file_name);
     }
   }
 
@@ -255,9 +254,6 @@ int sys_open(const char* file) {
   p->fd_table[idx].fd = fd;
   p->fd_table[idx].file = f;
 
-  p->fd_table[idx].file_name = malloc(strlen(file) + 1);
-  memcpy(p->fd_table[idx].file_name, file, strlen(file) + 1);
-
   lock_release(&sys_file_lock);
   return fd;
 }
@@ -322,24 +318,6 @@ int sys_write(int fd, const void* buffer, unsigned size) {
   struct file* f = p->fd_table[idx].file;
   lock_acquire(&sys_file_lock);
 
-  // 判断是否为正在执行的 ELF 文件
-  for (size_t i = 0; i < MAX_THREADS; i++) {
-    if (elf_file_set[i] == NULL)
-      continue;
-
-    size_t a = strlen(elf_file_set[i]);
-    size_t b = strlen(p->fd_table[idx].file_name);
-
-    if (a != b)
-      continue;
-
-    if (memcmp(elf_file_set[i], p->fd_table[idx].file_name, a) == 0) {
-      lock_release(&sys_file_lock);
-      // 似乎测试要求的是要返回0 通过rox-*
-      return 0;
-    }
-  }
-
   int write_size = file_write(f, buffer, size);
   lock_release(&sys_file_lock);
   return write_size;
@@ -382,8 +360,6 @@ void sys_close(int fd) {
 
   p->fd_table[idx].fd = 0;
   p->fd_table[idx].file = NULL;
-  free(p->fd_table[idx].file_name);
-  p->fd_table[idx].file_name = NULL;
 }
 
 /* 校验 args 是否正确 */
