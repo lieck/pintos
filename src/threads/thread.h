@@ -25,23 +25,6 @@ typedef int tid_t;
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63     /* Highest priority. */
 
-// 存储子进程的退出状态数量
-#define EXIT_STATUS_NUM 128
-
-// TODO(p1-syscall): 子进程的状态
-struct child_status {
-  struct list_elem elem;
-
-  tid_t tid;
-
-  // 子进程的地址，为 null 时表示子进程已经退出
-  struct thread *child;
-
-  // 退出的状态
-  int exit_status;
-
-  struct semaphore sema;
-};
 
 /* A kernel thread or user process.
 
@@ -119,15 +102,7 @@ struct thread {
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 
-  // TODP(p1-Process Control Syscalls)
-  // 父进程
   struct thread* parent;
-  
-  // 子进程的退出状态
-  struct list child_exit_status;
-
-  // 用于通知子进程是否创建成功的信号量
-  struct semaphore chile_sema;
 };
 
 /* Types of scheduler that the user can request the kernel
@@ -176,8 +151,5 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
-
-struct child_status* get_child(struct thread* t, tid_t tid);
-
 
 #endif /* threads/thread.h */

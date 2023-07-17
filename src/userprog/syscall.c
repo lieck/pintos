@@ -121,89 +121,16 @@ int sys_practice(int i) { return i + 1; }
 void sys_halt(void) { shutdown_power_off(); }
 
 void sys_exit(int status) {
-  struct thread* t = thread_current();
-
-  printf("%s: exit(%d)\n", t->pcb->process_name, status);
-
-  // 通知子进程：父进程已经退出
-  {
-    struct list_elem *iter = list_begin(&t->child_exit_status);
-    while (iter!= list_end(&t->child_exit_status)) {
-      struct child_status* cs = list_entry(iter, struct child_status, elem);
-      cs->child->parent = NULL;
-      iter = list_remove(iter);
-      free(cs);
-    }
-  }
-
-  // 通知父进程自己的退出状态
-  if(t->parent != NULL) {
-    struct child_status *cs = get_child(t->parent, t->tid);
-    ASSERT(cs != NULL);
-    cs->exit_status = status;
-    cs->child = NULL;
-    sema_up(&cs->sema);
-  }
-
-  lock_acquire(&sys_file_lock);
-
-  // 取消保护 ELF 文件
-  file_close(t->pcb->elf_file);
-
-  // 清理打开的文件集合
-  struct list_elem *iter = list_begin(&t->pcb->fd_list);
-  for(; iter != list_end(&t->pcb->fd_list); ) {
-    struct file_info* f_info = list_entry(iter, struct file_info, elem);
-    iter = list_remove(iter);
-    file_close(f_info->file);
-    free(f_info);
-  }
-  lock_release(&sys_file_lock);
-
-  process_exit();
+  process_exit(status);
 }
 
 pid_t sys_exec(const char* cmd_line) {
-  struct thread* t = thread_current();
-  pid_t pid = process_execute(cmd_line);
-
-  if (pid == TID_ERROR)
-    return -1;
-
-  // 阻塞等待子进程创建
-  sema_down(&t->chile_sema);
-
-  // 判断子进程是否创建成功
-  struct child_status* cs = get_child(t, pid);
-  ASSERT(cs != NULL);
-
-
-  // 创建失败
-  if(cs->exit_status == -1) {
-    list_remove(&cs->elem);
-    free(cs);
-    return -1;
-  }
-
-  return pid;
+  return process_execute(cmd_line);
 }
 
 // TODO(p1-process control syscalls) 等待子进程 pid 终止
 int sys_wait(pid_t pid) {
-  struct thread* t = thread_current();
-
-  // TODO 因为没有实现用户态线程，因此这里的 pid 与 tid 一致
-  struct child_status* cs = get_child(t, pid);
-  if(cs == NULL) {
-    return -1;
-  }
-
-  sema_down(&cs->sema);
-  
-  int ret = cs->exit_status;
-  list_remove(&cs->elem);
-  free(cs);
-  return ret;
+  return process_wait(pid);
 }
 
 int sys_create(const char* file, unsigned initial_size) {
