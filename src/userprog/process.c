@@ -148,10 +148,8 @@ static void start_process(void* file_name_) {
     // 唤醒父进程，并设置退出的状态
     // 当前父进程一定处于调用 sys_exec 的状态
     if (t->parent != NULL) {
-      size_t idx = get_child(t->parent, t->tid);
-      ASSERT(idx < EXIT_STATUS_NUM);
-      t->parent->child_exit_status[idx].t = NULL;
-      t->parent->child_exit_status[idx].exit_status = -1;
+      struct child_status* cs = get_child(t->parent, t->tid);
+      cs->exit_status = -1;
       sema_up(&t->parent->chile_sema);
     }
 

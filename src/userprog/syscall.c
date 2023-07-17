@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/process.h"
 #include "syscall.h"
@@ -122,24 +123,25 @@ void sys_exit(int status) {
   printf("%s: exit(%d)\n", t->pcb->process_name, status);
 
   // 通知子进程：父进程已经退出
-  for (size_t i = 0; i < EXIT_STATUS_NUM; i++) {
-    if (t->child_exit_status[i].t != NULL) {
-      t->child_exit_status[i].t->parent = NULL;
+  {
+    struct list_elem *iter = list_begin(&t->child_exit_status);
+    while (iter!= list_end(&t->child_exit_status)) {
+      struct child_status* cs = list_entry(iter, struct child_status, elem);
+      cs->child->parent = NULL;
+      iter = list_remove(iter);
+      free(cs);
     }
   }
 
   // 通知父进程自己的退出状态
-  if (t->parent != NULL) {
-    for (size_t i = 0; i < EXIT_STATUS_NUM; i++) {
-      if (t->parent->child_exit_status[i].tid == t->tid) {
-        t->parent->child_exit_status[i].exit_status = status;
-        t->parent->child_exit_status[i].t = NULL;
-        break;
-      }
-    }
+  if(t->parent != NULL) {
+    struct child_status *cs = get_child(t->parent, t->tid);
+    ASSERT(cs != NULL);
+    cs->exit_status = status;
+    barrier();
+    cs->child = NULL;
   }
 
-  
   lock_acquire(&sys_file_lock);
 
   // 取消保护 ELF 文件
@@ -169,12 +171,14 @@ pid_t sys_exec(const char* cmd_line) {
   sema_down(&t->chile_sema);
 
   // 判断子进程是否创建成功
-  size_t idx = get_child(t, pid);
-  ASSERT(idx < EXIT_STATUS_NUM);
+  struct child_status* cs = get_child(t, pid);
+  ASSERT(cs != NULL);
+
 
   // 创建失败
-  if (t->child_exit_status[idx].t == NULL) {
-    t->child_exit_status[idx].tid = 0;
+  if(cs->exit_status == -1) {
+    list_remove(&cs->elem);
+    free(cs);
     return -1;
   }
 
@@ -186,18 +190,19 @@ int sys_wait(pid_t pid) {
   struct thread* t = thread_current();
 
   // TODO 因为没有实现用户态线程，因此这里的 pid 与 tid 一致
-  size_t idx = get_child(t, pid);
-
-  // pid 不为子进程或已经调用 wait
-  if (idx == EXIT_STATUS_NUM)
+  struct child_status* cs = get_child(t, pid);
+  if(cs == NULL) {
     return -1;
+  }
 
   do {
-    if (t->child_exit_status[idx].t == NULL) {
-      t->child_exit_status[idx].tid = 0;
-      return t->child_exit_status[idx].exit_status;
+    if(cs->child == NULL) {
+      int ret = cs->exit_status;
+      list_remove(&cs->elem);
+      free(cs);
+      return ret;
     }
-
+    
     // 阻塞等待 pid 退出
     timer_sleep(100);
   } while (true);
