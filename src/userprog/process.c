@@ -4,6 +4,7 @@
 #include <list.h>
 #include <round.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,9 +23,6 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-
-// 该信号量用于控制 Pintos 的退出
-static struct semaphore temporary;
 
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
@@ -45,11 +43,16 @@ void userprog_init(void) {
      so that t->pcb->pagedir is guaranteed to be NULL (the kernel's
      page directory) when t->pcb is assigned, because a timer interrupt
      can come at any time and activate our pagedir */
-  t->pcb = calloc(sizeof(struct process), 1);
+  t->pcb = malloc(sizeof(struct process));
   success = t->pcb != NULL;
 
   /* Kill the kernel if we did not succeed */
   ASSERT(success);
+
+  t->pcb->pagedir = NULL;
+  t->pcb->main_thread = NULL;
+  t->pcb->elf_file = NULL;
+  list_init(&t->pcb->child_exit_status);
 }
 
 /* Starts a new thread running a user program loaded from
@@ -65,21 +68,50 @@ pid_t process_execute(const char* file_name) {
   static bool init = false;
   if (!init) {
     init = true;
-    sema_init(&temporary, 0);
     lock_init(&sys_file_lock);
   }
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
-  if (fn_copy == NULL)
+  if (fn_copy == NULL) {
     return TID_ERROR;
+  }
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  // name 可能由多个字符串构成, thread name 只取第一个字符串
+  // 例如 name = "stack-align-3 a b" 的 thread name 为 "stack-align-3"
+  // 这里限制 name 最大为 100，如果需要更改则还要改后面的调用
+  ASSERT(strlen(file_name) < 100);
+  char thread_name[100];
+  size_t split_idx = 0;
+  while(file_name[split_idx] != ' ' && file_name[split_idx] != '\0') {
+    split_idx++;
+  }
+  memcpy(thread_name, file_name, split_idx);
+  thread_name[split_idx] = '\0';
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
+  tid = thread_create(thread_name, PRI_DEFAULT, start_process, fn_copy);
+  if (tid == TID_ERROR) {
     palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+
+  struct thread* curr = thread_current();
+  if(curr->pcb != NULL) {
+    struct child_status *cs = get_child(curr->pcb, tid);
+    ASSERT(cs != NULL);
+
+    sema_down(&cs->sema);
+
+    if(cs->exit_status == TID_ERROR) {
+      list_remove(&cs->elem);
+      free(cs);
+      return TID_ERROR;
+    }
+  }
+  
   return tid;
 }
 
@@ -98,6 +130,7 @@ static void start_process(void* file_name_) {
   /* Initialize process control block */
   if (success) {
     list_init(&new_pcb->fd_list);
+    list_init(&new_pcb->child_exit_status);
     // 0 和 1 为特殊 fd
     new_pcb->next_fd = 2;
     new_pcb->elf_file = NULL;
@@ -119,7 +152,6 @@ static void start_process(void* file_name_) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
 
-
     // 保护可执行文件
     lock_acquire(&sys_file_lock);
     success = load(file_name, &if_.eip, &if_.esp);
@@ -139,26 +171,19 @@ static void start_process(void* file_name_) {
   /* Clean up. Exit on failure or jump to userspace */
   palloc_free_page(file_name);
   if (!success) {
-
-    // TODO(p1-exec call) 只允许3号进程退出，具体原因见文档
-    // 可能有更优美的处理方式？
-    if (t->tid == 3) {
-      sema_up(&temporary);
-    }
-
-    // 唤醒父进程，并设置退出的状态
-    // 当前父进程一定处于调用 sys_exec 的状态
+    /* 唤醒父进程，并设置退出的状态 */
     if (t->parent != NULL) {
-      struct child_status* cs = get_child(t->parent, t->tid);
+      struct child_status* cs = get_child(t->parent->pcb, t->tid);
       cs->exit_status = -1;
-      sema_up(&t->parent->chile_sema);
+      sema_up(&cs->sema);
     }
 
     thread_exit();
   }
 
   if (t->parent != NULL) {
-    sema_up(&t->parent->chile_sema);
+    struct child_status* cs = get_child(t->parent->pcb, t->tid);
+    sema_up(&cs->sema);
   }
 
   /* Start the user process by simulating a return from an
@@ -180,13 +205,25 @@ static void start_process(void* file_name_) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait(pid_t child_pid UNUSED) {
-  sema_down(&temporary);
-  return 0;
+int process_wait(pid_t child_pid) {
+  struct thread* curr = thread_current();
+
+  // TODO 因为没有实现用户态线程，因此这里的 pid 与 tid 一致
+  struct child_status* cs = get_child(curr->pcb, child_pid);
+  if(cs == NULL) {
+    return -1;
+  }
+
+  sema_down(&cs->sema);
+  
+  int ret = cs->exit_status;
+  list_remove(&cs->elem);
+  free(cs);
+  return ret;
 }
 
 /* Free the current process's resources. */
-void process_exit() {
+void process_exit(int status) {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
@@ -217,13 +254,47 @@ void process_exit() {
      If this happens, then an unfortuantely timed timer interrupt
      can try to activate the pagedir, but it is now freed memory */
   struct process* pcb_to_free = cur->pcb;
+
+  printf("%s: exit(%d)\n", cur->pcb->process_name, status);
+
+  /* 通知子进程：父进程已经退出 */
+  {
+    struct list_elem *iter = list_begin(&cur->pcb->child_exit_status);
+    while (iter!= list_end(&cur->pcb->child_exit_status)) {
+      struct child_status* cs = list_entry(iter, struct child_status, elem);
+      cs->child->parent = NULL;
+      iter = list_remove(iter);
+      free(cs);
+    }
+  }
+
+  /* 通知父进程自己的退出状态 */
+  if(cur->parent != NULL) {
+    struct child_status *cs = get_child(cur->parent->pcb, cur->tid);
+    ASSERT(cs != NULL);
+    cs->exit_status = status;
+    cs->child = NULL;
+    sema_up(&cs->sema);
+  }
+
+  lock_acquire(&sys_file_lock);
+
+  // 取消保护 ELF 文件
+  file_close(cur->pcb->elf_file);
+
+  // 清理打开的文件集合
+  struct list_elem *iter = list_begin(&cur->pcb->fd_list);
+  for(; iter != list_end(&cur->pcb->fd_list); ) {
+    struct file_info* f_info = list_entry(iter, struct file_info, elem);
+    iter = list_remove(iter);
+    file_close(f_info->file);
+    free(f_info);
+  }
+  lock_release(&sys_file_lock);
+
+
   cur->pcb = NULL;
   free(pcb_to_free);
-
-  // TODO(p1-exec call) 当 tid 为 3 的进程退出时，可以退出 pintos
-  if (cur->tid == 3) {
-    sema_up(&temporary);
-  }
 
   thread_exit();
 }
@@ -707,6 +778,18 @@ struct file_info * get_fd(struct process* pcb, int fd) {
     if (f->fd == fd) {
       return f;
     }
+  }
+  return NULL;
+}
+
+struct child_status* get_child(struct process *pcb, tid_t tid) {
+  struct list_elem* iter = list_begin(&pcb->child_exit_status);
+  while(iter != list_end(&pcb->child_exit_status)) {
+    struct child_status* cs = list_entry(iter, struct child_status, elem);
+    if (cs->tid == tid) {
+      return cs;
+    }
+    iter = list_next(iter);
   }
   return NULL;
 }

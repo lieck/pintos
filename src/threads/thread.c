@@ -12,6 +12,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -185,34 +186,23 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Allocate thread. */
   t = palloc_get_page(PAL_ZERO);
-  if (t == NULL)
+  if (t == NULL) {
     return TID_ERROR;
-
-  // TODO(p1-argument passing) name 可能由多个字符串构成, thread name 只取第一个字符串
-  // 例如 name = "stack-align-3 a b" 的 thread name 为 "stack-align-3"
-  // 这里限制 name 最大为 100，如果需要更改则还要改后面的调用
-  ASSERT(strlen(name) < 100);
-  char thread_name[100];
-  size_t split_idx = 0;
-  while(name[split_idx] != ' ' && name[split_idx] != '\0')
-    split_idx++;
-  memcpy(thread_name, name, split_idx);
-  thread_name[split_idx] = '\0';
+  }
 
   /* Initialize thread. */
-  init_thread(t, thread_name, priority);
+  init_thread(t, name, priority);
   tid = t->tid = allocate_tid();
 
-  // TODO(p1-sycall)
   // 添加子进程信息到父进程中
   struct thread *curr = thread_current();
-  if(curr->tid >= 3) {
+  if(curr->pcb != NULL) {
     t->parent = curr;
     struct child_status* cs = malloc(sizeof(struct child_status));
     cs->child = t;
     cs->tid = t->tid;
     sema_init(&cs->sema, 0);
-    list_push_front(&curr->child_exit_status, &cs->elem);
+    list_push_front(&curr->pcb->child_exit_status, &cs->elem);
   }
 
   /* Stack frame for kernel_thread(). */
@@ -459,10 +449,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   list_push_back(&all_list, &t->allelem);
   intr_set_level(old_level);
 
-  // TODO(p1-syscall)
   t->parent = NULL;
-  list_init(&t->child_exit_status);
-  sema_init(&t->chile_sema, 0);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -593,16 +580,3 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
-
-
-struct child_status* get_child(struct thread* t, tid_t tid) {
-  struct list_elem* iter = list_begin(&t->child_exit_status);
-  while(iter != list_end(&t->child_exit_status)) {
-    struct child_status* cs = list_entry(iter, struct child_status, elem);
-    if (cs->tid == tid) {
-      return cs;
-    }
-    iter = list_next(iter);
-  }
-  return NULL;
-}
