@@ -211,6 +211,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
     struct child_status* cs = malloc(sizeof(struct child_status));
     cs->child = t;
     cs->tid = t->tid;
+    sema_init(&cs->sema, 0);
     list_push_front(&curr->child_exit_status, &cs->elem);
   }
 

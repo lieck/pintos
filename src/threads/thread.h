@@ -40,7 +40,7 @@ struct child_status {
   // 退出的状态
   int exit_status;
 
-
+  struct semaphore sema;
 };
 
 /* A kernel thread or user process.

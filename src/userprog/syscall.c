@@ -138,8 +138,8 @@ void sys_exit(int status) {
     struct child_status *cs = get_child(t->parent, t->tid);
     ASSERT(cs != NULL);
     cs->exit_status = status;
-    barrier();
     cs->child = NULL;
+    sema_up(&cs->sema);
   }
 
   lock_acquire(&sys_file_lock);
@@ -195,17 +195,12 @@ int sys_wait(pid_t pid) {
     return -1;
   }
 
-  do {
-    if(cs->child == NULL) {
-      int ret = cs->exit_status;
-      list_remove(&cs->elem);
-      free(cs);
-      return ret;
-    }
-    
-    // 阻塞等待 pid 退出
-    timer_sleep(100);
-  } while (true);
+  sema_down(&cs->sema);
+  
+  int ret = cs->exit_status;
+  list_remove(&cs->elem);
+  free(cs);
+  return ret;
 }
 
 int sys_create(const char* file, unsigned initial_size) {
