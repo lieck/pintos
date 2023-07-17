@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include <list.h>
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
@@ -138,19 +139,20 @@ void sys_exit(int status) {
     }
   }
 
-  // 取消保护 ELF 文件
-  ASSERT(t->pcb->elf_file_idx != MAX_THREADS);
+  
   lock_acquire(&sys_file_lock);
 
-  // 清理打开的文件集合
-  for (size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
-    if (t->pcb->fd_table[i].fd != 0) {
-      file_close(t->pcb->fd_table[i].file);
-    }
-  }
+  // 取消保护 ELF 文件
+  file_close(t->pcb->elf_file);
 
-  free(elf_file_set[t->pcb->elf_file_idx]);
-  elf_file_set[t->pcb->elf_file_idx] = NULL;
+  // 清理打开的文件集合
+  struct list_elem *iter = list_begin(&t->pcb->fd_list);
+  for(; iter != list_end(&t->pcb->fd_list); ) {
+    struct file_info* f_info = list_entry(iter, struct file_info, elem);
+    iter = list_remove(iter);
+    file_close(f_info->file);
+    free(f_info);
+  }
   lock_release(&sys_file_lock);
 
   process_exit();
@@ -227,20 +229,6 @@ int sys_open(const char* file) {
   int fd = -1;
   struct process* p = thread_current()->pcb;
 
-  // 获取下一个可用的描述符
-  int idx = MAX_OPEN_FILE_SIZE;
-  for (size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
-    if (p->fd_table[i].fd == 0) {
-      idx = i;
-      break;
-    }
-  }
-
-  if (idx == MAX_OPEN_FILE_SIZE) {
-    printf("sys_open MAX_OPEN_FILE_SIZE\n");
-    return -1;
-  }
-
   lock_acquire(&sys_file_lock);
 
   struct file* f = filesys_open(file);
@@ -251,21 +239,26 @@ int sys_open(const char* file) {
 
   // 选择下一个描述符
   fd = p->next_fd++;
-  p->fd_table[idx].fd = fd;
-  p->fd_table[idx].file = f;
+  struct file_info *f_info = malloc(1 * sizeof(struct file_info));
+  f_info->file = f;
+  f_info->fd = fd;
 
+  list_push_front(&p->fd_list, &f_info->elem);
+  
   lock_release(&sys_file_lock);
   return fd;
 }
 
 int sys_filesize(int fd) {
   struct process* p = thread_current()->pcb;
-  size_t idx = get_fd(p, fd);
-  if (idx == MAX_OPEN_FILE_SIZE)
+
+  struct file_info* f_info = get_fd(p, fd);
+  if(f_info == NULL) {
     return -1;
+  }
 
   lock_acquire(&sys_file_lock);
-  int result = file_length(p->fd_table[idx].file);
+  int result = file_length(f_info->file);
   lock_release(&sys_file_lock);
   return result;
 }
@@ -274,16 +267,17 @@ int sys_read(int fd, void* buffer, unsigned size) {
   check_str(buffer);
 
   struct process* p = thread_current()->pcb;
-  size_t idx = get_fd(p, fd);
-  if (idx == MAX_OPEN_FILE_SIZE)
-    return -1;
 
-  struct file* f = p->fd_table[idx].file;
+  struct file_info* f_info = get_fd(p, fd);
+  if(f_info == NULL) {
+    return -1;
+  }
+
   // TODO 是否有不需要临时缓存区的方法？
   char* tem_buf = malloc(size * sizeof(char));
 
   lock_acquire(&sys_file_lock);
-  int read_size = file_read(f, tem_buf, size);
+  int read_size = file_read(f_info->file, tem_buf, size);
   lock_release(&sys_file_lock);
 
   for (int i = 0; i < read_size; i++) {
@@ -311,55 +305,59 @@ int sys_write(int fd, const void* buffer, unsigned size) {
   }
 
   struct process* p = thread_current()->pcb;
-  size_t idx = get_fd(p, fd);
-  if (idx == MAX_OPEN_FILE_SIZE)
+
+  struct file_info* f_info = get_fd(p, fd);
+  if(f_info == NULL) {
     return -1;
+  }
 
-  struct file* f = p->fd_table[idx].file;
   lock_acquire(&sys_file_lock);
-
-  int write_size = file_write(f, buffer, size);
+  int write_size = file_write(f_info->file, buffer, size);
   lock_release(&sys_file_lock);
   return write_size;
 }
 
 void sys_seek(int fd, unsigned position) {
   struct process* p = thread_current()->pcb;
-  size_t idx = get_fd(p, fd);
-  if (idx == MAX_OPEN_FILE_SIZE)
-    return;
 
-  struct file* f = p->fd_table[idx].file;
+  struct file_info* f_info = get_fd(p, fd);
+  if(f_info == NULL) {
+    return -1;
+  }
 
   lock_acquire(&sys_file_lock);
-  file_seek(f, position);
+  file_seek(f_info->file, position);
   lock_release(&sys_file_lock);
 }
 
 unsigned sys_tell(int fd) {
   struct process* p = thread_current()->pcb;
-  size_t idx = get_fd(p, fd);
-  if (idx == MAX_OPEN_FILE_SIZE)
+
+  struct file_info* f_info = get_fd(p, fd);
+  if(f_info == NULL) {
     return -1;
+  }
 
   lock_acquire(&sys_file_lock);
-  unsigned result = file_tell(p->fd_table[idx].file);
+  unsigned result = file_tell(f_info->file);
   lock_release(&sys_file_lock);
   return result;
 }
 
 void sys_close(int fd) {
   struct process* p = thread_current()->pcb;
-  size_t idx = get_fd(p, fd);
-  if (idx == MAX_OPEN_FILE_SIZE)
-    return;
+
+  struct file_info* f_info = get_fd(p, fd);
+  if(f_info == NULL) {
+    return -1;
+  }
 
   lock_acquire(&sys_file_lock);
-  file_close(p->fd_table[idx].file);
+  file_close(f_info->file);
   lock_release(&sys_file_lock);
 
-  p->fd_table[idx].fd = 0;
-  p->fd_table[idx].file = NULL;
+  list_remove(&f_info->elem);
+  free(f_info);
 }
 
 /* 校验 args 是否正确 */
