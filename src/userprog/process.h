@@ -21,6 +21,10 @@ typedef tid_t pid_t;
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
+/* Predefined file handles. */
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+
 /* 文件描述符项 */
 struct file_info {
    struct list_elem elem;

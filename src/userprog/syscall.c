@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include <list.h>
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/synch.h"
@@ -9,6 +10,8 @@
 #include "syscall.h"
 #include "threads/vaddr.h"
 #include "devices/timer.h"
+#include "lib/kernel/stdio.h"
+#include "devices/input.h"
 
 static void syscall_handler(struct intr_frame*);
 
@@ -266,6 +269,17 @@ int sys_filesize(int fd) {
 int sys_read(int fd, void* buffer, unsigned size) {
   check_str(buffer);
 
+  if(fd == STDOUT_FILENO) {
+    sys_exit(-1);
+  }
+
+  if(fd == STDIN_FILENO) {
+    for(size_t i = 0; i < size; i++) {
+      char c = input_getc();
+      ((char*)buffer)[i] = c;
+    }
+  }
+
   struct process* p = thread_current()->pcb;
 
   struct file_info* f_info = get_fd(p, fd);
@@ -295,13 +309,16 @@ int sys_read(int fd, void* buffer, unsigned size) {
 int sys_write(int fd, const void* buffer, unsigned size) {
   check_str(buffer);
 
-  if (fd == 0) {
+
+
+  if (fd == STDIN_FILENO) {
     sys_exit(-1);
   }
 
   if (fd == 1) {
-    printf("%s", buffer);
-    return strlen(buffer);
+    size_t buf_size = strlen(buffer);
+    putbuf(buffer, buf_size);
+    return buf_size;
   }
 
   struct process* p = thread_current()->pcb;

@@ -98,7 +98,8 @@ static void start_process(void* file_name_) {
   /* Initialize process control block */
   if (success) {
     list_init(&new_pcb->fd_list);
-    new_pcb->next_fd = 3;
+    // 0 和 1 为特殊 fd
+    new_pcb->next_fd = 2;
     new_pcb->elf_file = NULL;
 
     // Ensure that timer_interrupt() -> schedule() -> process_activate()
