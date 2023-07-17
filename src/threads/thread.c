@@ -1,5 +1,6 @@
 #include "threads/thread.h"
 #include <debug.h>
+#include <list.h>
 #include <stddef.h>
 #include <random.h>
 #include <stdio.h>
@@ -205,15 +206,13 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   // TODO(p1-sycall)
   // 添加子进程信息到父进程中
   struct thread *curr = thread_current();
-  if(curr->tid >= 3)
+  if(curr->tid >= 3) {
     t->parent = curr;
-  for(size_t i = 0; i <= EXIT_STATUS_NUM; i++) {
-    ASSERT(i != EXIT_STATUS_NUM);
-    if(curr->child_exit_status[i].tid == 0) {
-      curr->child_exit_status[i].tid = tid;
-      curr->child_exit_status[i].t = t;
-      break;
-    }
+    struct child_status* cs = malloc(sizeof(struct child_status));
+    cs->child = t;
+    cs->tid = t->tid;
+    sema_init(&cs->sema, 0);
+    list_push_front(&curr->child_exit_status, &cs->elem);
   }
 
   /* Stack frame for kernel_thread(). */
@@ -462,7 +461,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
 
   // TODO(p1-syscall)
   t->parent = NULL;
-  memset(t->child_exit_status, 0, sizeof t->child_exit_status);
+  list_init(&t->child_exit_status);
   sema_init(&t->chile_sema, 0);
 }
 
@@ -595,14 +594,15 @@ static tid_t allocate_tid(void) {
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
 
-// 搜索是否存在对应的子进程，如果没有返回 EXIT_STATUS_NUM
-size_t get_child(struct thread* t, tid_t tid) {
-  size_t idx = EXIT_STATUS_NUM;
-  for(size_t i = 0; i < EXIT_STATUS_NUM; i++) {
-    if (t->child_exit_status[i].tid == tid) {
-      idx = i;
-      break;
+
+struct child_status* get_child(struct thread* t, tid_t tid) {
+  struct list_elem* iter = list_begin(&t->child_exit_status);
+  while(iter != list_end(&t->child_exit_status)) {
+    struct child_status* cs = list_entry(iter, struct child_status, elem);
+    if (cs->tid == tid) {
+      return cs;
     }
+    iter = list_next(iter);
   }
-  return idx;
+  return NULL;
 }

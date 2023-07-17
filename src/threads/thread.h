@@ -30,14 +30,17 @@ typedef int tid_t;
 
 // TODO(p1-syscall): 子进程的状态
 struct child_status {
-  // 不为 0 时有效
+  struct list_elem elem;
+
   tid_t tid;
 
   // 子进程的地址，为 null 时表示子进程已经退出
-  struct thread *t;
+  struct thread *child;
 
   // 退出的状态
   int exit_status;
+
+  struct semaphore sema;
 };
 
 /* A kernel thread or user process.
@@ -121,7 +124,7 @@ struct thread {
   struct thread* parent;
   
   // 子进程的退出状态
-  struct child_status child_exit_status[EXIT_STATUS_NUM];
+  struct list child_exit_status;
 
   // 用于通知子进程是否创建成功的信号量
   struct semaphore chile_sema;
@@ -174,7 +177,7 @@ void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
-size_t get_child(struct thread* t, tid_t tid);
+struct child_status* get_child(struct thread* t, tid_t tid);
 
 
 #endif /* threads/thread.h */

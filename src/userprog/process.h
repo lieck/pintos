@@ -2,6 +2,7 @@
 #define USERPROG_PROCESS_H
 
 #include "threads/thread.h"
+#include <list.h>
 #include <stdint.h>
 
 // At most 8MB can be allocated to the stack
@@ -20,8 +21,14 @@ typedef tid_t pid_t;
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
+/* Predefined file handles. */
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+
 /* 文件描述符项 */
 struct file_info {
+   struct list_elem elem;
+
    int fd;
    struct file *file;
 };
@@ -37,12 +44,11 @@ struct process {
   char process_name[16];      /* Name of the main thread */
   struct thread* main_thread; /* Pointer to main thread */
    
-  // elf 在 elf_file_set 中的位置
-  size_t elf_file_idx;
+  struct file *elf_file;
 
-  // 文件相关
-  int next_fd;
-  struct file_info fd_table[MAX_OPEN_FILE_SIZE];
+
+  int next_fd;    /* 下一个 fd */
+  struct list fd_list;  /* fd table */
 };
 
 void userprog_init(void);
@@ -60,12 +66,9 @@ tid_t pthread_join(tid_t);
 void pthread_exit(void);
 void pthread_exit_main(void);
 
-size_t get_fd(struct process*, int fd);
+struct file_info* get_fd(struct process* pcb, int fd);
 
 // 文件系统调用的锁
 struct lock sys_file_lock;
-
-// 正在执行的 ELF 文件集合
-char *elf_file_set[MAX_THREADS];
 
 #endif /* userprog/process.h */

@@ -1,6 +1,7 @@
 #include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
+#include <list.h>
 #include <round.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -96,9 +97,10 @@ static void start_process(void* file_name_) {
 
   /* Initialize process control block */
   if (success) {
-    memset(new_pcb->fd_table, 0, sizeof new_pcb->fd_table);
-    new_pcb->next_fd = 3;
-    new_pcb->elf_file_idx = MAX_THREADS;
+    list_init(&new_pcb->fd_list);
+    // 0 和 1 为特殊 fd
+    new_pcb->next_fd = 2;
+    new_pcb->elf_file = NULL;
 
     // Ensure that timer_interrupt() -> schedule() -> process_activate()
     // does not try to activate our uninitialized pagedir
@@ -117,38 +119,10 @@ static void start_process(void* file_name_) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
 
-    // 解析参数
-    // TODO(p1-argument passing) 对于 stack-align-2 a 的参数需要解析为 stack-align-2
-    size_t split_idx = 0;
-    while (file_name[split_idx] != ' ' && file_name[split_idx] != '\0')
-      split_idx++;
-    char* elf_file_name = malloc(sizeof(char) * (split_idx + 1));
-    memcpy(elf_file_name, file_name, split_idx);
-    elf_file_name[split_idx] = '\0';
 
     // 保护可执行文件
     lock_acquire(&sys_file_lock);
     success = load(file_name, &if_.eip, &if_.esp);
-
-    if (success) {
-      for (size_t i = 0; i < MAX_THREADS; i++) {
-        if (elf_file_set[i] == NULL) {
-          elf_file_set[i] = elf_file_name;
-          t->pcb->elf_file_idx = i;
-          struct file* elf_file = filesys_open(elf_file_name);
-          if (elf_file != NULL) {
-            file_deny_write(elf_file);
-          } else {
-            printf("load: %s: open failed\n", elf_file_name);
-          }
-          break;
-        }
-      }
-      ASSERT(new_pcb->elf_file_idx != MAX_THREADS);
-    } else {
-      free(elf_file_name);
-    }
-
     lock_release(&sys_file_lock);
   }
 
@@ -175,10 +149,8 @@ static void start_process(void* file_name_) {
     // 唤醒父进程，并设置退出的状态
     // 当前父进程一定处于调用 sys_exec 的状态
     if (t->parent != NULL) {
-      size_t idx = get_child(t->parent, t->tid);
-      ASSERT(idx < EXIT_STATUS_NUM);
-      t->parent->child_exit_status[idx].t = NULL;
-      t->parent->child_exit_status[idx].exit_status = -1;
+      struct child_status* cs = get_child(t->parent, t->tid);
+      cs->exit_status = -1;
       sema_up(&t->parent->chile_sema);
     }
 
@@ -514,11 +486,16 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   /* Start address. */
   *eip = (void (*)(void))ehdr.e_entry;
 
+
+  t->pcb->elf_file = file;
+  file_deny_write(file);
   success = true;
 
 done:
   /* We arrive here whether the load is successful or not. */
-  file_close(file);
+  if(!success) {
+    file_close(file);
+  }
   return success;
 }
 
@@ -723,10 +700,13 @@ void pthread_exit(void) {}
    now, it does nothing. */
 void pthread_exit_main(void) {}
 
-size_t get_fd(struct process* p, int fd) {
-  for (size_t i = 0; i < MAX_OPEN_FILE_SIZE; i++) {
-    if (p->fd_table[i].fd == fd)
-      return i;
+struct file_info * get_fd(struct process* pcb, int fd) {
+  struct list_elem *it = list_begin(&pcb->fd_list);
+  for(; it != list_end(&pcb->fd_list); it = list_next(it)) {
+    struct file_info* f = list_entry(it, struct file_info, elem);
+    if (f->fd == fd) {
+      return f;
+    }
   }
-  return MAX_OPEN_FILE_SIZE;
+  return NULL;
 }
