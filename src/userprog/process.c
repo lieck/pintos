@@ -27,7 +27,7 @@
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
-bool setup_thread(void (**eip)(void), void** esp);
+bool setup_thread(void (**eip)(void), void** esp, int idx, void** args);
 char* init_stack_frame(const char* name, char* stack);
 
 /* Initializes user programs in the system by ensuring the main
@@ -52,7 +52,7 @@ void userprog_init(void) {
   t->pcb->pagedir = NULL;
   t->pcb->main_thread = NULL;
   t->pcb->elf_file = NULL;
-  list_init(&t->pcb->child_exit_status);
+  list_init(&t->pcb->thread_list);
 }
 
 /* Starts a new thread running a user program loaded from
@@ -130,7 +130,13 @@ static void start_process(void* file_name_) {
   /* Initialize process control block */
   if (success) {
     list_init(&new_pcb->fd_list);
-    list_init(&new_pcb->child_exit_status);
+    list_init(&new_pcb->thread_list);
+
+    new_pcb->active_thread_cnt = 1;
+    new_pcb->next_stack_idx = 1;
+
+    lock_init(&new_pcb->lock);
+
     // 0 和 1 为特殊 fd
     new_pcb->next_fd = 2;
     new_pcb->elf_file = NULL;
@@ -259,8 +265,8 @@ void process_exit(int status) {
 
   /* 通知子进程：父进程已经退出 */
   {
-    struct list_elem *iter = list_begin(&cur->pcb->child_exit_status);
-    while (iter!= list_end(&cur->pcb->child_exit_status)) {
+    struct list_elem *iter = list_begin(&cur->pcb->thread_list);
+    while (iter!= list_end(&cur->pcb->thread_list)) {
       struct child_status* cs = list_entry(iter, struct child_status, elem);
       cs->child->parent = NULL;
       iter = list_remove(iter);
@@ -295,6 +301,7 @@ void process_exit(int status) {
 
   cur->pcb = NULL;
   free(pcb_to_free);
+  
 
   thread_exit();
 }
@@ -720,7 +727,39 @@ pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. You may find it necessary to change the
    function signature. */
-bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; }
+bool setup_thread(void (**eip)(void), void** esp, int idx, void** args) {
+  ASSERT(idx > 1);
+  /* 从 pool 获取可用的空闲页面 */
+  uint8_t *kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+  if(kpage == NULL) {
+    return false;
+  }
+
+  if(!install_page(((uint8_t*)PHYS_BASE) - idx * PGSIZE, kpage, true)) {
+    palloc_free_page(kpage);
+    return false;
+  }
+
+  *esp = PHYS_BASE - (idx - 1) * PGSIZE;
+  *esp -= 6 * sizeof(void*);
+
+  /* 初始化栈帧布局为
+                       +----------------+
+                       |        arg     |
+                       |        tf      |
+    stack pointer -->  | return 0       |
+                       +----------------+
+  */
+  size_t* stack_frame = *esp;
+  stack_frame[0] = 0;
+  stack_frame[1] = (size_t)args[1];
+  stack_frame[2] = (size_t)args[2];
+
+  /* eip 指向要执行的函数地址 sf */
+  *eip = args[0];
+
+  return true;
+}
 
 /* Starts a new thread with a new user stack running SF, which takes
    TF and ARG as arguments on its user stack. This new thread may be
@@ -731,7 +770,47 @@ bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; 
    This function will be implemented in Project 2: Multithreading and
    should be similar to process_execute (). For now, it does nothing.
    */
-tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSED) { return -1; }
+tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
+  struct thread *curr = thread_current();
+
+  lock_acquire(&curr->pcb->lock);
+  curr->pcb->active_thread_cnt++;
+  lock_release(&curr->pcb->lock);
+
+  /* 传递给 start_pthread 的参数 */
+  void** args = malloc(4 * sizeof(void*));
+  args[0] = sf;
+  args[1] = tf;
+  args[2] = arg;
+  args[3] = curr;
+  
+
+  tid_t tid = thread_create(curr->pcb->process_name, curr->priority, start_pthread, args);
+  if(tid == TID_ERROR) {
+    free(args);
+    goto done;
+  }
+  
+  /* 阻塞等待子线程执行 */
+  struct child_status *cs = get_child(curr->pcb, tid);
+  ASSERT(cs != NULL);
+
+  sema_down(&cs->sema);
+
+  if(cs->exit_status == TID_ERROR) {
+    goto done;
+    return TID_ERROR;
+  }
+
+done:
+  if(tid == TID_ERROR) {
+    lock_acquire(&curr->pcb->lock);
+    curr->pcb->active_thread_cnt--;
+    lock_release(&curr->pcb->lock);
+  }
+
+  return tid;
+}
 
 /* A thread function that creates a new user thread and starts it
    running. Responsible for adding itself to the list of threads in
@@ -739,7 +818,46 @@ tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSE
 
    This function will be implemented in Project 2: Multithreading and
    should be similar to start_process (). For now, it does nothing. */
-static void start_pthread(void* exec_ UNUSED) {}
+static void start_pthread(void* exec) {
+  void** args = exec;
+
+  struct thread *parent = (struct thread*)args[3];
+  struct thread *curr = thread_current();
+
+  /* 设置 pcb 并切换页表 */
+  curr->pcb = parent->pcb;
+  process_activate();
+  ASSERT(curr->pcb != NULL);
+
+  struct intr_frame if_;
+  memset(&if_, 0, sizeof if_);
+  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+  if_.cs = SEL_UCSEG;
+  if_.eflags = FLAG_IF | FLAG_MBS;
+
+  lock_acquire(&curr->pcb->lock);
+  int idx = ++curr->pcb->next_stack_idx;
+  lock_release(&curr->pcb->lock);
+
+  /* Set up stack. */
+  bool success = setup_thread(&if_.eip, &if_.esp, idx, args);
+  curr->stakc_idx = idx;
+  free(args);
+
+  struct child_status* cs = get_child(curr->pcb, curr->tid);
+
+  /* 执行失败 */
+  if(!success) {
+    cs->exit_status = -1;
+    sema_up(&cs->sema);
+    thread_exit();
+  }
+
+  sema_up(&cs->sema);
+
+  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+  NOT_REACHED();
+}
 
 /* Waits for thread with TID to die, if that thread was spawned
    in the same process and has not been waited on yet. Returns TID on
@@ -748,7 +866,54 @@ static void start_pthread(void* exec_ UNUSED) {}
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-tid_t pthread_join(tid_t tid UNUSED) { return -1; }
+tid_t pthread_join(tid_t tid) {
+  if(tid == TID_ERROR) {
+    return TID_ERROR;
+  }
+
+  struct thread *curr = thread_current();
+  struct process *pcb = curr->pcb;
+
+  lock_acquire(&pcb->lock);
+  struct child_status *cs = get_child(pcb, tid);
+  if(cs == NULL || cs->active) {
+    lock_release(&pcb->lock);
+    return TID_ERROR;
+  }
+  cs->active = true;
+  lock_release(&pcb->lock);
+
+  sema_down(&cs->sema);
+  return tid;
+}
+
+
+void pthread_exit_t(void) {
+  struct thread *curr = thread_current();
+
+  /* 释放线程对应的栈 */
+  uint8_t* kpage = pagedir_get_page(curr->pcb->pagedir, ((uint8_t*)PHYS_BASE) - curr->stakc_idx * PGSIZE);
+  ASSERT(kpage != NULL);
+  palloc_free_page(kpage);
+
+  /* 重置页表项 */
+  pagedir_clear_page(curr->pcb->pagedir, ((uint8_t*)PHYS_BASE) - curr->stakc_idx * PGSIZE);
+
+  lock_acquire(&curr->pcb->lock);
+  struct child_status *cs = get_child(curr->pcb, curr->tid);
+  int cnt = --curr->pcb->active_thread_cnt;
+  lock_release(&curr->pcb->lock);
+
+  sema_up(&cs->sema);
+  if(cnt == 0) {
+    /* 当前不存在活跃的线程，退出进程 */
+    process_exit(0);
+  } else {
+    curr->pcb = NULL;
+    thread_exit();
+  }
+}
+
 
 /* Free the current thread's resources. Most resources will
    be freed on thread_exit(), so all we have to do is deallocate the
@@ -759,7 +924,9 @@ tid_t pthread_join(tid_t tid UNUSED) { return -1; }
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit(void) {}
+void pthread_exit(void) {
+  pthread_exit_t();
+}
 
 /* Only to be used when the main thread explicitly calls pthread_exit.
    The main thread should wait on all threads in the process to
@@ -769,7 +936,9 @@ void pthread_exit(void) {}
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit_main(void) {}
+void pthread_exit_main(void) {
+  pthread_exit_t();
+}
 
 struct file_info * get_fd(struct process* pcb, int fd) {
   struct list_elem *it = list_begin(&pcb->fd_list);
@@ -783,8 +952,8 @@ struct file_info * get_fd(struct process* pcb, int fd) {
 }
 
 struct child_status* get_child(struct process *pcb, tid_t tid) {
-  struct list_elem* iter = list_begin(&pcb->child_exit_status);
-  while(iter != list_end(&pcb->child_exit_status)) {
+  struct list_elem* iter = list_begin(&pcb->thread_list);
+  while(iter != list_end(&pcb->thread_list)) {
     struct child_status* cs = list_entry(iter, struct child_status, elem);
     if (cs->tid == tid) {
       return cs;

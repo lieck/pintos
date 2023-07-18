@@ -103,6 +103,8 @@ struct thread {
   unsigned magic; /* Detects stack overflow. */
 
   struct thread* parent;
+
+  int stakc_idx;  /* 用户态使用栈的索引 */
 };
 
 /* Types of scheduler that the user can request the kernel

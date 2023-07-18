@@ -194,15 +194,16 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   init_thread(t, name, priority);
   tid = t->tid = allocate_tid();
 
-  // 添加子进程信息到父进程中
+  // 添加 thread 到父进程中
   struct thread *curr = thread_current();
   if(curr->pcb != NULL) {
     t->parent = curr;
     struct child_status* cs = malloc(sizeof(struct child_status));
     cs->child = t;
     cs->tid = t->tid;
+    cs->active = false;
     sema_init(&cs->sema, 0);
-    list_push_front(&curr->pcb->child_exit_status, &cs->elem);
+    list_push_front(&curr->pcb->thread_list, &cs->elem);
   }
 
   /* Stack frame for kernel_thread(). */

@@ -38,12 +38,13 @@ struct child_status {
   struct list_elem elem;
 
   tid_t tid;
+  int exit_status; /* 退出的状态 */
 
-  // 子进程的地址，为 null 时表示子进程已经退出
-  struct thread *child;
+  /* 进程使用的变量 */
+  struct thread* child; /* 为 null 时表示 thread 已经退出 */
 
-  // 退出的状态
-  int exit_status;
+  /* 线程使用的变量 */
+  bool active; /* 线程变量，是否调用过 join */
 
   struct semaphore sema;
 };
@@ -65,7 +66,12 @@ struct process {
   int next_fd;         /* 下一个 fd */
   struct list fd_list; /* fd table */
 
-  struct list child_exit_status; /* 子进程的退出状态 */
+  struct list thread_list;       /* 线程的链表 */
+
+  int active_thread_cnt; /* 活跃的线程数量 */
+  int next_stack_idx;    /* 下一个线程使用栈索引 */
+
+  struct lock lock;
 };
 
 void userprog_init(void);

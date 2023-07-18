@@ -114,6 +114,24 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     default:
       break;
   }
+
+
+  // user thread
+  switch (args[0]) {
+  case SYS_PT_CREATE:
+    check_num32(args + 1);
+    check_num32(args + 2);
+    check_num32(args + 3);
+    f->eax = pthread_execute((stub_fun)args[1], (pthread_fun)args[2], (void*)args[3]);
+    break;
+  case SYS_PT_EXIT:
+    pthread_exit();
+    break;
+  case SYS_PT_JOIN:
+    check_num32(args + 1);
+    f->eax = pthread_join(args[1]);
+    break;
+  }
 }
 
 int sys_practice(int i) { return i + 1; }
