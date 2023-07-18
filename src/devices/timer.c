@@ -75,12 +75,13 @@ int64_t timer_elapsed(int64_t then) { return timer_ticks() - then; }
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
+// p2-alarm 修改：
 void timer_sleep(int64_t ticks) {
   int64_t start = timer_ticks();
-
+  int64_t wakeup_time = start + ticks;
   ASSERT(intr_get_level() == INTR_ON);
-  while (timer_elapsed(start) < ticks)
-    thread_yield();
+  // p2-alarm 添加: 睡眠当前线程
+  thread_sleep(wakeup_time);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -128,6 +129,14 @@ void timer_print_stats(void) { printf("Timer: %" PRId64 " ticks\n", timer_ticks(
 /* Timer interrupt handler. */
 static void timer_interrupt(struct intr_frame* args UNUSED) {
   ticks++;
+
+  // p2-alarm添加：检查当前ticks下有无线程应被唤醒
+  enum intr_level old_level;
+  old_level = intr_disable();
+  thread_wake(ticks);
+  intr_set_level(old_level);
+  // END
+
   thread_tick();
 }
 

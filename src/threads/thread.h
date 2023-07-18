@@ -7,6 +7,7 @@
 #include "threads/synch.h"
 #include "threads/fixed-point.h"
 
+
 /* States in a thread's life cycle. */
 enum thread_status {
   THREAD_RUNNING, /* Running thread. */
@@ -105,6 +106,9 @@ struct thread {
   struct thread* parent;
 
   int stakc_idx;  /* 用户态使用栈的索引 */
+
+  // p2-alarm: 记录被唤醒的时刻，默认赋值为0
+  int wakeup_time; 
 };
 
 /* Types of scheduler that the user can request the kernel
@@ -131,6 +135,10 @@ void thread_print_stats(void);
 
 typedef void thread_func(void* aux);
 tid_t thread_create(const char* name, int priority, thread_func*, void*);
+
+// p2-alarm添加：
+void thread_wake(int64_t ticks);
+void thread_sleep(int64_t wakeup_time);
 
 void thread_block(void);
 void thread_unblock(struct thread*);
