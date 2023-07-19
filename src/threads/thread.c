@@ -26,6 +26,9 @@
    that are ready to run but not actually running. */
 static struct list fifo_ready_list;
 
+// p2-alarm添加：睡眠队列
+static struct list fifo_sleep_list;
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -111,6 +114,8 @@ void thread_init(void) {
   lock_init(&tid_lock);
   list_init(&fifo_ready_list);
   list_init(&all_list);
+  // p2-alarm: 添加睡眠队列的初始化
+  list_init(&fifo_sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread();
@@ -132,6 +137,39 @@ void thread_start(void) {
 
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down(&idle_started);
+}
+
+// p2-alarm添加：唤醒线程
+// 检查当前ticks下是否有睡眠线程应当被唤醒
+void thread_wake(int64_t ticks) {
+  struct list_elem* e;
+  if (list_empty(&fifo_sleep_list)) {
+    return;
+  }
+  for (e = list_begin(&fifo_sleep_list); e != list_end(&fifo_sleep_list);
+  e = list_next(e)) {
+    struct thread* t = list_entry(e, struct thread, elem);
+    if (t->wakeup_time <= ticks) {
+      e = list_remove(&t->elem)->prev; // 从睡眠队列移出去，用prev是为了在删除节点仍能正确for循环
+      thread_unblock(t);
+    }
+  }
+}
+
+// p2-alarm添加：沉睡线程
+// 使当前线程睡大觉
+void thread_sleep(int64_t wakeup_time) {
+  struct thread* t = thread_current();
+  enum intr_level old_level;
+
+  ASSERT(!intr_context());
+
+  old_level = intr_disable();
+  t->wakeup_time = wakeup_time;
+  t->status = THREAD_BLOCKED;
+  list_push_back(&fifo_sleep_list, &t->elem);
+  schedule();
+  intr_set_level(old_level);
 }
 
 /* Called by the timer interrupt handler at each timer tick.
