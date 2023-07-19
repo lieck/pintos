@@ -144,6 +144,9 @@ static void start_process(void* file_name_) {
     new_pcb->next_sync_id = CHAR_MIN;
     new_pcb->exit_active = false;
 
+    new_pcb->main_thread_pid = t->tid;
+    new_pcb->parent = t->parent;
+
     lock_init(&new_pcb->lock);
     lock_init(&new_pcb->exit_lock);
 
@@ -348,8 +351,8 @@ void process_exit(int status) {
   }
 
   /* 通知父进程自己的退出状态 */
-  if(cur->parent != NULL) {
-    struct child_status *cs = get_child(cur->parent->pcb, cur->tid);
+  if(cur->pcb->parent != NULL) {
+    struct child_status *cs = get_child(cur->pcb->parent->pcb, cur->pcb->main_thread_pid);
     ASSERT(cs != NULL);
     cs->exit_status = status;
     cs->child = NULL;
@@ -386,7 +389,6 @@ void process_exit(int status) {
   cur->pcb = NULL;
   free(pcb_to_free);
   
-
   thread_exit();
 }
 
@@ -976,14 +978,16 @@ tid_t pthread_join(tid_t tid) {
 void pthread_exit_t(void) {
   struct thread *curr = thread_current();
 
-  /* 释放线程对应的栈 */
-  ASSERT(curr->stakc_idx >= 1);
-  uint8_t* kpage = pagedir_get_page(curr->pcb->pagedir, ((uint8_t*)PHYS_BASE) - curr->stakc_idx * PGSIZE);
-  ASSERT(kpage != NULL);
-  palloc_free_page(kpage);
+  /* 释放线程对应的栈, main 线程不能释放栈帧 */
+  if(!is_main_thread(curr, curr->pcb)) {
+    ASSERT(curr->stakc_idx >= 1);
+    uint8_t* kpage = pagedir_get_page(curr->pcb->pagedir, ((uint8_t*)PHYS_BASE) - curr->stakc_idx * PGSIZE);
+    ASSERT(kpage != NULL);
+    palloc_free_page(kpage);
 
-  /* 重置页表项 */
-  pagedir_clear_page(curr->pcb->pagedir, ((uint8_t*)PHYS_BASE) - curr->stakc_idx * PGSIZE);
+    /* 重置页表项 */
+    pagedir_clear_page(curr->pcb->pagedir, ((uint8_t*)PHYS_BASE) - curr->stakc_idx * PGSIZE);
+  }
 
   lock_acquire(&curr->pcb->lock);
   struct child_status *cs = get_child(curr->pcb, curr->tid);

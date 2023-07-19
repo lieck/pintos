@@ -79,6 +79,9 @@ struct process {
   bool exit_active;           /* 是否调用了 exit 退出进程 */
   struct lock exit_lock;      /* 保护调用 exit 的锁 */
   struct semaphore exit_sema; /* 等待线程退出的信号量 */
+
+  struct thread* parent;
+  int main_thread_pid;
 };
 
 void userprog_init(void);
