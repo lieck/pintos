@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <stdio.h>
 #include <syscall.h>
 
 void _pthread_start_stub(pthread_fun fun, void* arg);

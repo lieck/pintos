@@ -1,6 +1,7 @@
 #ifndef USERPROG_PROCESS_H
 #define USERPROG_PROCESS_H
 
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include <list.h>
 #include <stdint.h>
@@ -38,13 +39,12 @@ struct child_status {
   struct list_elem elem;
 
   tid_t tid;
+  bool is_thread; /* 是否为线程 */
+
   int exit_status; /* 退出的状态 */
+  bool active;     /* 是否调用过 wait or join */
 
-  /* 进程使用的变量 */
-  struct thread* child; /* 为 null 时表示 thread 已经退出 */
-
-  /* 线程使用的变量 */
-  bool active; /* 线程变量，是否调用过 join */
+  struct thread* child; /* 进程使用的变量, 为 null 时表示 thread 已经退出 */
 
   struct semaphore sema;
 };
@@ -66,12 +66,19 @@ struct process {
   int next_fd;         /* 下一个 fd */
   struct list fd_list; /* fd table */
 
-  struct list thread_list;       /* 线程的链表 */
+  struct list thread_list; /* 子进程 or 线程的链表 */
 
   int active_thread_cnt; /* 活跃的线程数量 */
   int next_stack_idx;    /* 下一个线程使用栈索引 */
 
+  int next_sync_id;
+  struct list pthread_sync_list;
+
   struct lock lock;
+
+  bool exit_active;           /* 是否调用了 exit 退出进程 */
+  struct lock exit_lock;      /* 保护调用 exit 的锁 */
+  struct semaphore exit_sema; /* 等待线程退出的信号量 */
 };
 
 void userprog_init(void);
@@ -91,7 +98,9 @@ void pthread_exit_main(void);
 
 struct file_info* get_fd(struct process* pcb, int fd);
 
-struct child_status* get_child(struct process *pcb, tid_t tid);
+struct child_status* get_child(struct process* pcb, tid_t tid);
+
+struct pthread_synch_info* get_sync(struct process* pcb, int id);
 
 // 文件系统调用的锁
 struct lock sys_file_lock;
