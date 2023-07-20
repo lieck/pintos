@@ -71,13 +71,11 @@ struct process {
   int active_thread_cnt; /* 活跃的线程数量 */
   int next_stack_idx;    /* 下一个线程使用栈索引 */
 
-  int next_sync_id;
   struct list pthread_sync_list;
 
   struct lock lock;
 
   bool exit_active;           /* 是否调用了 exit 退出进程 */
-  struct lock exit_lock;      /* 保护调用 exit 的锁 */
   struct semaphore exit_sema; /* 等待线程退出的信号量 */
 
   struct thread* parent;

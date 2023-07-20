@@ -58,7 +58,6 @@ void userprog_init(void) {
   t->pcb->elf_file = NULL;
   list_init(&t->pcb->thread_list);
   lock_init(&t->pcb->lock);
-  lock_init(&t->pcb->exit_lock);
 }
 
 /* Starts a new thread running a user program loaded from
@@ -141,14 +140,12 @@ static void start_process(void* file_name_) {
 
     new_pcb->active_thread_cnt = 1;
     new_pcb->next_stack_idx = 1;
-    new_pcb->next_sync_id = CHAR_MIN;
     new_pcb->exit_active = false;
 
     new_pcb->main_thread_pid = t->tid;
     new_pcb->parent = t->parent;
 
     lock_init(&new_pcb->lock);
-    lock_init(&new_pcb->exit_lock);
 
     sema_init(&new_pcb->exit_sema, 0);
 

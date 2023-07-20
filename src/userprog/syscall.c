@@ -38,6 +38,15 @@ void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "
 static void syscall_handler(struct intr_frame* f UNUSED) {
   uint32_t* args = ((uint32_t*)f->esp);
 
+  /* 判断 thread 是否退出 */
+  struct thread* curr = thread_current();
+  lock_acquire(&curr->pcb->lock);
+  if(curr->pcb->exit_active) {
+    lock_release(&curr->pcb->lock);
+    pthread_exit();
+  }
+  lock_release(&curr->pcb->lock);
+
   /*
    * The following print statement, if uncommented, will print out the syscall
    * number whenever a process enters a system call. You might find it useful
@@ -177,7 +186,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   }
 
   /* 判断 thread 是否退出 */
-  struct thread* curr = thread_current();
   lock_acquire(&curr->pcb->lock);
   if(curr->pcb->exit_active) {
     lock_release(&curr->pcb->lock);

@@ -1,6 +1,5 @@
 #include "list.h"
 
-
 /* Synchronization Types */
 typedef char lock_t;
 typedef char sema_t;
@@ -18,7 +17,7 @@ struct pthread_synch_info {
   int id;
   enum SyuncType type; /* 当前同步类型 */
   int tid;             /* 当前持有 lock 的 thread tid, 为 0 时表示没有被持有锁 */
-  int value;      /* 信号量的 V */
+  int value;           /* 信号量的 V */
 
   struct list waiters; /* List of waiting threads. */
 };

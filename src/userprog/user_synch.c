@@ -9,18 +9,13 @@
 #include <stdlib.h>
 #include "process.h"
 
-
-
 void intr_thread_block(void);
 
-bool pthread_lock_init(lock_t* lock) {  
+bool pthread_lock_init(lock_t* lock) {
   struct thread* curr = thread_current();
   struct process* pcb = curr->pcb;
 
   lock_acquire(&pcb->lock);
-
-  int id = ++pcb->next_sync_id;
-  *lock = id;
 
   struct pthread_synch_info* psi = malloc(sizeof(struct pthread_synch_info));
   psi->type = LOCK_TYPE;
@@ -91,7 +86,7 @@ bool pthread_lock_release(lock_t* lock) {
 }
 
 bool pthread_sema_init(sema_t* sema, int val) {
-  if(val < 0) {
+  if (val < 0) {
     return false;
   }
 
@@ -99,9 +94,6 @@ bool pthread_sema_init(sema_t* sema, int val) {
   struct process* pcb = curr->pcb;
 
   lock_acquire(&pcb->lock);
-
-  int id = ++pcb->next_sync_id;
-  *sema = id;
 
   struct pthread_synch_info* psi = malloc(sizeof(struct pthread_synch_info));
   psi->type = SEMA_TYPE;
@@ -163,9 +155,8 @@ bool pthread_sema_up(sema_t* sema) {
   return true;
 }
 
-
 void intr_thread_block(void) {
-  enum intr_level old_level;  
+  enum intr_level old_level;
   old_level = intr_disable();
 
   thread_block();
