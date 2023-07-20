@@ -44,7 +44,7 @@ struct child_status {
   int exit_status; /* 退出的状态 */
   bool active;     /* 是否调用过 wait or join */
 
-  struct thread* child; /* 进程使用的变量, 为 null 时表示 thread 已经退出 */
+  struct process* child_pcb; /* 子进程的 pcb, 表示子进程时有效 */
 
   struct semaphore sema;
 };
@@ -78,7 +78,7 @@ struct process {
   bool exit_active;           /* 是否调用了 exit 退出进程 */
   struct semaphore exit_sema; /* 等待线程退出的信号量 */
 
-  struct thread* parent;
+  struct process* parent_pcb;
   int main_thread_pid;
 };
 

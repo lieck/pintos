@@ -143,7 +143,7 @@ static void start_process(void* file_name_) {
     new_pcb->exit_active = false;
 
     new_pcb->main_thread_pid = t->tid;
-    new_pcb->parent = t->parent;
+    new_pcb->parent_pcb = t->parent->pcb;
 
     lock_init(&new_pcb->lock);
 
@@ -201,6 +201,7 @@ static void start_process(void* file_name_) {
 
   if (t->parent != NULL) {
     struct child_status* cs = get_child(t->parent->pcb, t->tid);
+    cs->child_pcb = t->pcb;
     sema_up(&cs->sema);
   }
 
@@ -340,7 +341,7 @@ void process_exit(int status) {
     while (iter!= list_end(&cur->pcb->thread_list)) {
       struct child_status* cs = list_entry(iter, struct child_status, elem);
       if(!cs->is_thread) {
-        cs->child->parent = NULL;
+        cs->child_pcb = NULL;
       }
       iter = list_remove(iter);
       free(cs);
@@ -348,11 +349,11 @@ void process_exit(int status) {
   }
 
   /* 通知父进程自己的退出状态 */
-  if(cur->pcb->parent != NULL) {
-    struct child_status *cs = get_child(cur->pcb->parent->pcb, cur->pcb->main_thread_pid);
+  if(cur->pcb->parent_pcb != NULL) {
+    struct child_status *cs = get_child(cur->pcb->parent_pcb, cur->pcb->main_thread_pid);
     ASSERT(cs != NULL);
     cs->exit_status = status;
-    cs->child = NULL;
+    cs->child_pcb = NULL;
     sema_up(&cs->sema);
   }
 
