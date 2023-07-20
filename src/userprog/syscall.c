@@ -1,8 +1,13 @@
 #include "userprog/syscall.h"
 #include <list.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <syscall-nr.h>
+#include "devices/shutdown.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -12,6 +17,8 @@
 #include "devices/timer.h"
 #include "lib/kernel/stdio.h"
 #include "devices/input.h"
+#include "threads/malloc.h"
+#include "user_synch.h"
 
 static void syscall_handler(struct intr_frame*);
 
@@ -24,11 +31,21 @@ static int get_user(const uint8_t* uaddr);
 
 static void check_str(const char* ptr);
 static void check_num32(uint8_t* ptr);
+static bool check_char_ptr(char *ptr);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
   uint32_t* args = ((uint32_t*)f->esp);
+
+  /* 判断 thread 是否退出 */
+  struct thread* curr = thread_current();
+  lock_acquire(&curr->pcb->lock);
+  if(curr->pcb->exit_active) {
+    lock_release(&curr->pcb->lock);
+    pthread_exit();
+  }
+  lock_release(&curr->pcb->lock);
 
   /*
    * The following print statement, if uncommented, will print out the syscall
@@ -39,7 +56,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   // printf("System call number: %d\n", args[0]);
 
-  // TODO(p1-process control syscalls)
   check_num32(args);
 
   switch (args[0]) {
@@ -114,6 +130,68 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     default:
       break;
   }
+
+
+  // user thread
+  switch (args[0]) {
+  case SYS_PT_CREATE:
+    check_num32(args + 1);
+    check_num32(args + 2);
+    check_num32(args + 3);
+    f->eax = pthread_execute((stub_fun)args[1], (pthread_fun)args[2], (void*)args[3]);
+    break;
+  case SYS_PT_EXIT:
+    pthread_exit();
+    break;
+  case SYS_PT_JOIN:
+    check_num32(args + 1);
+    f->eax = pthread_join(args[1]);
+    break;
+  case SYS_GET_TID:
+      f->eax = thread_current()->tid;
+      break;
+  }
+
+  /* User-level synchronization syscalls */
+  if(args[0] >= SYS_LOCK_INIT && args[0] <= SYS_SEMA_UP) {
+    /* check ptr */
+    check_num32(args + 1);
+    char *ptr = (void*)args[1];
+    if(!check_char_ptr(ptr)) {
+      f->eax = false;
+      return;
+    }
+    
+    switch (args[0]) {
+      case SYS_LOCK_INIT:
+      f->eax = pthread_lock_init(ptr);
+      break;
+    case SYS_LOCK_ACQUIRE:
+      f->eax = pthread_lock_acquire(ptr);
+      break;
+    case SYS_LOCK_RELEASE:
+      f->eax = pthread_lock_release(ptr);
+      break;
+    case SYS_SEMA_INIT:
+      check_num32(args + 2);
+      f->eax = pthread_sema_init(ptr, args[2]);
+      break;
+    case SYS_SEMA_DOWN:
+      f->eax = pthread_sema_down(ptr);
+      break;
+    case SYS_SEMA_UP:
+      f->eax = pthread_sema_up(ptr);
+      break;
+    }
+  }
+
+  /* 判断 thread 是否退出 */
+  lock_acquire(&curr->pcb->lock);
+  if(curr->pcb->exit_active) {
+    lock_release(&curr->pcb->lock);
+    pthread_exit();
+  }
+  lock_release(&curr->pcb->lock);
 }
 
 int sys_practice(int i) { return i + 1; }
@@ -266,7 +344,7 @@ void sys_seek(int fd, unsigned position) {
 
   struct file_info* f_info = get_fd(p, fd);
   if(f_info == NULL) {
-    return -1;
+    return;
   }
 
   lock_acquire(&sys_file_lock);
@@ -293,7 +371,7 @@ void sys_close(int fd) {
 
   struct file_info* f_info = get_fd(p, fd);
   if(f_info == NULL) {
-    return -1;
+    return;
   }
 
   lock_acquire(&sys_file_lock);
@@ -333,6 +411,14 @@ static void check_str(const char* ptr) {
 
 exit:
   sys_exit(-1);
+}
+
+/* 判断 ptr 指向的地址是否有效 */
+static bool check_char_ptr(char *ptr) {
+  if (ptr >= PHYS_BASE || get_user(ptr) == -1) {
+    return false;
+  }
+  return true;
 }
 
 /* Reads a byte at user virtual address UADDR.

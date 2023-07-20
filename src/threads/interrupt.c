@@ -11,6 +11,7 @@
 #include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #endif
 
 /* Programmable Interrupt Controller (PIC) registers.
@@ -320,6 +321,13 @@ void intr_handler(struct intr_frame* frame) {
   bool external;
   intr_handler_func* handler;
 
+  if(is_trap_from_userspace(frame)) {
+    struct thread* curr = thread_current();
+    if(curr->pcb != NULL && curr->pcb->exit_active) {
+      pthread_exit();
+    }
+  }
+
   /* External interrupts are special.
      We only handle one at a time (so interrupts must be off)
      and they need to be acknowledged on the PIC (see below).
@@ -352,8 +360,9 @@ void intr_handler(struct intr_frame* frame) {
     in_external_intr = false;
     pic_end_of_interrupt(frame->vec_no);
 
-    if (yield_on_return)
+    if (yield_on_return) {
       thread_yield();
+    }
   }
 }
 
