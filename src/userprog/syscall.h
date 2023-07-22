@@ -7,6 +7,7 @@ void syscall_init(void);
 
 // p1-process control syscalls
 int sys_practice(int i);
+double sys_compute_e(int n);
 void sys_halt(void);
 void sys_exit(int status);
 pid_t sys_exec(const char* cmd_line);
