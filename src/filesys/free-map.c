@@ -1,6 +1,8 @@
 #include "filesys/free-map.h"
 #include <bitmap.h>
 #include <debug.h>
+#include <stdint.h>
+#include "devices/timer.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
@@ -37,7 +39,6 @@ bool free_map_allocate(size_t cnt, block_sector_t* sectorp) {
 void free_map_release(block_sector_t sector, size_t cnt) {
   ASSERT(bitmap_all(free_map, sector, cnt));
   bitmap_set_multiple(free_map, sector, cnt, false);
-  bitmap_write(free_map, free_map_file);
 }
 
 /* Opens the free map file and reads it from disk. */
@@ -50,7 +51,10 @@ void free_map_open(void) {
 }
 
 /* Writes the free map to disk and closes the free map file. */
-void free_map_close(void) { file_close(free_map_file); }
+void free_map_close(void) {
+  free_map_flush();
+  file_close(free_map_file);
+}
 
 /* Creates a new free map file on disk and writes the free map to
    it. */
@@ -63,6 +67,11 @@ void free_map_create(void) {
   free_map_file = file_open(inode_open(FREE_MAP_SECTOR));
   if (free_map_file == NULL)
     PANIC("can't open free map");
-  if (!bitmap_write(free_map, free_map_file))
+}
+
+/* 将 free map 刷盘 */
+void free_map_flush(void) {
+  if (!bitmap_write(free_map, free_map_file)) {
     PANIC("can't write free map");
+  }
 }
