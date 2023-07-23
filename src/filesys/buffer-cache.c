@@ -17,11 +17,17 @@
  * 维护请求队列, 读写线程从请求队列中获取 block 操作
  */
 
+/*
+ * 用于缓存 buffer
+ * 要求：调用 buffer_read 和 buffer_write 需要保证不会同时读写一个 sector
+ */
+
+
 struct buffer_info {
   block_sector_t sector;
   bool valid;         /* 是否有效 */
   bool dirty;         /* 是否为脏数据 */
-  volatile bool use;  /* 是否在使用中 */
+  int use;            /* 使用中的线程, 最多存在两个(预取和当前读写的线程) */
   bool reference;     /* CLOCK 引用位 */
   int64_t write_time; /* 上次写入的时间 */
 };
@@ -40,7 +46,7 @@ size_t prefetching_end;
 struct lock buffer_lock;
 
 size_t victim(void);
-bool get_buffer_idx(block_sector_t sector, size_t *idx);
+bool get_buffer_idx(block_sector_t sector, size_t* idx);
 
 void init_buffer_cache(void) {
   lock_init(&buffer_lock);
@@ -48,26 +54,39 @@ void init_buffer_cache(void) {
   prefetching_end = 0;
 }
 
+/* 从缓存中读取 sector, pf 为需要预取的 sector(不为0有效) */
 void buffer_read(block_sector_t sector, void* buffer, block_sector_t pf) {
   lock_acquire(&buffer_lock);
+
+  if(pf != 0) {
+    prefetching_add(pf);
+  }
 
   size_t idx;
   bool hit = get_buffer_idx(sector, &idx);
   block_sector_t old_sector;
 
-  if(!hit) {
+  if (!hit) {
     idx = victim();
     old_sector = buffer_info[idx].sector;
     buffer_info[idx].sector = sector;
     buffer_info[idx].write_time = timer_ticks();
   }
 
-  buffer_info[idx].use = true;
+  buffer_info[idx].use++;
   buffer_info[idx].reference = true;
+
+  // 如果正在预取, 则自选等待
+  while(buffer_info[idx].use > 1) {
+    lock_release(&buffer_lock);
+    timer_msleep(5);
+    lock_acquire(&buffer_lock);
+  }
+
   lock_release(&buffer_lock);
 
   if (!hit) {
-    if(buffer_info[idx].dirty) {
+    if (buffer_info[idx].dirty) {
       block_write(fs_device, old_sector, &buffer_data[idx]);
     }
 
@@ -77,39 +96,48 @@ void buffer_read(block_sector_t sector, void* buffer, block_sector_t pf) {
 
   memcpy(buffer, &buffer_data[idx], BLOCK_SECTOR_SIZE);
 
-  barrier();
-  buffer_info[idx].use = false;
+  lock_acquire(&buffer_lock);
+  buffer_info[idx].use--;
+  lock_release(&buffer_lock);
 }
 
 void buffer_write(block_sector_t sector, const void* buffer) {
   lock_acquire(&buffer_lock);
+  prefetching_add(sector);
 
   size_t idx;
   bool hit = get_buffer_idx(sector, &idx);
   block_sector_t old_sector;
-  if(!hit) {
+  if (!hit) {
     idx = victim();
     old_sector = buffer_info[idx].sector;
     buffer_info[idx].sector = sector;
     buffer_info[idx].write_time = timer_ticks();
   }
 
-  buffer_info[idx].use = true;
+  buffer_info[idx].use++;
   buffer_info[idx].reference = true;
+
+  // 如果正在预取, 则自旋等待
+  while(buffer_info[idx].use > 1) {
+    lock_release(&buffer_lock);
+    timer_msleep(5);
+    lock_acquire(&buffer_lock);
+  }
+
   lock_release(&buffer_lock);
 
   if (!hit && buffer_info[idx].dirty) {
     block_write(fs_device, old_sector, &buffer_data[idx]);
   }
 
-  
   memcpy(&buffer_data[idx], buffer, BLOCK_SECTOR_SIZE);
   block_write(fs_device, sector, buffer);
   buffer_info[idx].dirty = true;
 
-  barrier();
-  
-  buffer_info[idx].use = false;
+  lock_acquire(&buffer_lock);
+  buffer_info[idx].use--;
+  lock_release(&buffer_lock);
 }
 
 void buffer_remove(block_sector_t sector) {
@@ -119,7 +147,7 @@ void buffer_remove(block_sector_t sector) {
       buffer_info[i].valid = false;
       buffer_info[i].sector = 0;
       buffer_info[i].dirty = false;
-      buffer_info[i].use = false;
+      buffer_info[i].use = 0;
       break;
     }
   }
@@ -144,7 +172,7 @@ size_t victim(void) {
 
   int check_round = 0;
   for (;; idx = (idx + 1) % BUFFER_CACHE_SIZE) {
-    if (buffer_info[idx].use) {
+    if (buffer_info[idx].use > 0) {
       continue;
     }
 
@@ -162,11 +190,10 @@ size_t victim(void) {
   return 0;
 }
 
-
 /* 获取 sector 所在的位置 */
-bool get_buffer_idx(block_sector_t sector, size_t *idx) {
-  for(size_t i = 0; i < BUFFER_CACHE_SIZE; i++) {
-    if(buffer_info[i].sector == sector) {
+bool get_buffer_idx(block_sector_t sector, size_t* idx) {
+  for (size_t i = 0; i < BUFFER_CACHE_SIZE; i++) {
+    if (buffer_info[i].sector == sector) {
       *idx = i;
       return true;
     }
@@ -175,21 +202,22 @@ bool get_buffer_idx(block_sector_t sector, size_t *idx) {
   return false;
 }
 
-
-/* 添加到预取队列 */
+/* 添加到预取队列, 调用需要外部同步 */
 void prefetching_add(block_sector_t sector) {
   size_t next = (prefetching_top + 1) % PREFETCHING_LIST_SIZE;
-  if(next == prefetching_end) {
+  if (next == prefetching_end) {
     prefetching_end = (prefetching_top + 1) % PREFETCHING_LIST_SIZE;
   }
 
-  prefetching_top = next;
   prefetching[prefetching_top] = sector;
+  prefetching_top = next;
 }
 
 /* 清空预取队列 */
 void prefetching_clean(void) {
+  lock_acquire(&buffer_lock);
   prefetching_top = prefetching_end;
+  lock_release(&buffer_lock);
 }
 
 void buffer_background_flush(int64_t curr_time) {
@@ -212,9 +240,30 @@ void buffer_background_flush(int64_t curr_time) {
       }
     }
   }
-  lock_release(&buffer_lock);
 
   // 预取
+  while (prefetching_top != prefetching_end) {
+    block_sector_t sector = prefetching[prefetching_end];
+    prefetching_end = (prefetching_end + 1) % PREFETCHING_LIST_SIZE;
 
+    size_t idx;
+    bool hit = get_buffer_idx(sector, &idx);
+    if (!hit) {
+      idx = victim();
+      buffer_info[idx].dirty = false;
+      buffer_info[idx].reference = true;
+      buffer_info[idx].use++;
+      buffer_info[idx].valid = true;
+      buffer_info[idx].write_time = curr_time;
+      buffer_info[idx].sector = sector;
+      lock_release(&buffer_lock);
 
+      block_read(fs_device, sector, &buffer_data[idx]);
+
+      lock_acquire(&buffer_lock);
+      buffer_info[idx].use--;
+    }
+  }
+
+  lock_release(&buffer_lock);
 }
