@@ -1,8 +1,10 @@
 #include "devices/block.h"
+#include <stdint.h>
 
+void init_buffer_cache(void);
+void buffer_read(block_sector_t sector, void* buffer);
+void buffer_write(block_sector_t sector, const void* buffer);
+void buffer_remove(block_sector_t sector);
+void buffer_flush_all(void);
 
-
-void init_block_cache(void);
-void block_read_cache(block_sector_t sector, void* buffer);
-void block_write_cache(block_sector_t sector, const void* buffer);
-void block_remove_cache(block_sector_t sector);
+void buffer_background_flush(int64_t curr_time);
