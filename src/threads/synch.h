@@ -15,11 +15,14 @@ void sema_down(struct semaphore*);
 bool sema_try_down(struct semaphore*);
 void sema_up(struct semaphore*);
 void sema_self_test(void);
+// p2-prior添加
+struct thread* next_waiter(struct list waiters);
 
 /* Lock. */
 struct lock {
   struct thread* holder;      /* Thread holding lock (for debugging). */
   struct semaphore semaphore; /* Binary semaphore controlling access. */
+  int old_priority; //p2-prior添加：该线程获得锁时的优先级，用于恢复优先级
 };
 
 void lock_init(struct lock*);

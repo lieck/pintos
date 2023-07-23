@@ -57,7 +57,6 @@ void sema_init(struct semaphore* sema, unsigned value) {
    thread will probably turn interrupts back on. */
 void sema_down(struct semaphore* sema) {
   enum intr_level old_level;
-
   ASSERT(sema != NULL);
   ASSERT(!intr_context());
 
@@ -92,6 +91,7 @@ bool sema_try_down(struct semaphore* sema) {
   return success;
 }
 
+// p2-prior修改
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
    and wakes up one thread of those waiting for SEMA, if any.
 
@@ -103,9 +103,41 @@ void sema_up(struct semaphore* sema) {
 
   old_level = intr_disable();
   if (!list_empty(&sema->waiters))
-    thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+    // p2-prior修改：
+    switch (active_sched_policy) {
+    case SCHED_FIFO:
+      thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+      break;
+    case SCHED_PRIO: {
+      enum intr_level old_level;
+      // old_level = intr_disable();
+
+      struct list_elem* e;
+      struct thread* t_max_prior = list_entry(list_begin(&sema->waiters), struct thread, elem);
+      for (e = list_begin(&sema->waiters); e != list_end(&sema->waiters); 
+        e = list_next(e)) {
+        struct thread* t = list_entry(e, struct thread, elem);
+        if (t->priority >= t_max_prior->priority) {
+          t_max_prior = t;
+        }
+      }
+      list_remove(&t_max_prior->elem);
+      thread_unblock(t_max_prior);
+      // intr_set_level(old_level);
+      break;
+    }
+      default:
+        PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
+    }
+    // thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
   sema->value++;
   intr_set_level(old_level);
+}
+
+//p2-prior添加：按优先级返回下一个执行的线程
+struct thread* next_waiter(struct list waiters) {
+  struct thread* ret;
+  
 }
 
 static void sema_test_helper(void* sema_);
@@ -174,8 +206,27 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
-  sema_down(&lock->semaphore);
-  lock->holder = thread_current();
+  //p2-prior修改 & 添加：priority donation
+  struct thread* cur = thread_current();
+  switch (active_sched_policy) {
+    case SCHED_FIFO:
+      sema_down(&lock->semaphore);
+      lock->holder = cur;
+      break;
+    case SCHED_PRIO:
+      // priority donation
+      if (lock->holder != NULL) {
+        if (lock->holder->priority < cur->priority) {
+          lock->holder->priority = cur->priority;
+        }
+      }
+      sema_down(&lock->semaphore);
+      lock->holder = cur;
+      lock->old_priority = cur->priority; //记录获取锁时的优先级，用于被donate后恢复
+      break;
+    default:
+      PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -205,8 +256,25 @@ void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
-  lock->holder = NULL;
-  sema_up(&lock->semaphore);
+  switch (active_sched_policy) {
+    case SCHED_FIFO:
+      lock->holder = NULL;
+      sema_up(&lock->semaphore);
+      break;
+    case SCHED_PRIO:
+      // "如果该线程不再是最高优先级，必须立刻释放CPU！"
+      // 如果该线程目前优先级不同于原优先级，则一定有更高优先级的线程在等待锁
+      if (thread_current()->priority != lock->old_priority) {
+        ASSERT(thread_current()->priority > lock->old_priority);
+        thread_current()->priority = lock->old_priority;
+        lock->holder = NULL;
+        sema_up(&lock->semaphore);
+        thread_yield();
+      }
+      break;
+    default:
+      PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false
