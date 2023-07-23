@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
+#include "float.h"
 #include "threads/flags.h"
 #include "threads/intr-stubs.h"
 #include "threads/io.h"
@@ -321,9 +322,13 @@ void intr_handler(struct intr_frame* frame) {
   bool external;
   intr_handler_func* handler;
 
+  char temp_fpu_state[108];
+  fpu_stenv(temp_fpu_state);
+
   if(is_trap_from_userspace(frame)) {
     struct thread* curr = thread_current();
     if(curr->pcb != NULL && curr->pcb->exit_active) {
+      fpu_ldenv(temp_fpu_state);
       pthread_exit();
     }
   }
@@ -361,9 +366,11 @@ void intr_handler(struct intr_frame* frame) {
     pic_end_of_interrupt(frame->vec_no);
 
     if (yield_on_return) {
+      fpu_ldenv(temp_fpu_state);
       thread_yield();
     }
   }
+  fpu_ldenv(temp_fpu_state);
 }
 
 /* Handles an unexpected interrupt with interrupt frame F.  An

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "float.h"
 #include "threads/synch.h"
 #include "threads/fixed-point.h"
 
@@ -109,6 +110,9 @@ struct thread {
 
   // p2-alarm: 记录被唤醒的时刻，默认赋值为0
   int wakeup_time; 
+
+  /* save FPU environment when switch context and thread */
+  fpu_reg_t fpu_buffer_;
 };
 
 /* Types of scheduler that the user can request the kernel
