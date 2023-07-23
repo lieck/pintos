@@ -10,7 +10,7 @@
 #include <debug.h>
 
 #define BUFFER_CACHE_SIZE 64
-#define PREFETCHING_LIST 24
+#define PREFETCHING_LIST_SIZE 24
 
 /*
  * 一种优化：使用电梯调度
@@ -33,7 +33,7 @@ struct buffer_info buffer_info[BUFFER_CACHE_SIZE];
 char buffer_data[BUFFER_CACHE_SIZE][BLOCK_SECTOR_SIZE];
 
 /* 预取队列 */
-block_sector_t prefetching[PREFETCHING_LIST];
+block_sector_t prefetching[PREFETCHING_LIST_SIZE];
 size_t prefetching_top;
 size_t prefetching_end;
 
@@ -48,7 +48,7 @@ void init_buffer_cache(void) {
   prefetching_end = 0;
 }
 
-void buffer_read(block_sector_t sector, void* buffer) {
+void buffer_read(block_sector_t sector, void* buffer, block_sector_t pf) {
   lock_acquire(&buffer_lock);
 
   size_t idx;
@@ -176,9 +176,20 @@ bool get_buffer_idx(block_sector_t sector, size_t *idx) {
 }
 
 
-/* 预取队列 */
-void push_aa(block_sector_t sector) {
-  
+/* 添加到预取队列 */
+void prefetching_add(block_sector_t sector) {
+  size_t next = (prefetching_top + 1) % PREFETCHING_LIST_SIZE;
+  if(next == prefetching_end) {
+    prefetching_end = (prefetching_top + 1) % PREFETCHING_LIST_SIZE;
+  }
+
+  prefetching_top = next;
+  prefetching[prefetching_top] = sector;
+}
+
+/* 清空预取队列 */
+void prefetching_clean(void) {
+  prefetching_top = prefetching_end;
 }
 
 void buffer_background_flush(int64_t curr_time) {
@@ -204,6 +215,6 @@ void buffer_background_flush(int64_t curr_time) {
   lock_release(&buffer_lock);
 
   // 预取
-  
+
 
 }

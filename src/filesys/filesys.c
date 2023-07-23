@@ -1,17 +1,22 @@
 #include "filesys/filesys.h"
 #include <debug.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 #include "buffer-cache.h"
+#include "stddef.h"
+#include "threads/thread.h"
 
 /* Partition that contains the file system. */
 struct block* fs_device;
 
 static void do_format(void);
+static void file_background(void* aux);
 
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
@@ -29,6 +34,8 @@ void filesys_init(bool format) {
     do_format();
 
   free_map_open();
+
+  thread_create("file-flush", PRI_DEFAULT - 1, file_background, NULL);
 }
 
 /* Shuts down the file system module, writing any unwritten data
@@ -90,4 +97,13 @@ static void do_format(void) {
     PANIC("root directory creation failed");
   free_map_close();
   printf("done.\n");
+}
+
+static void file_background(void* aux) {
+  for(;;) {
+    int64_t curr_time = timer_ticks();
+
+    buffer_background_flush(curr_time);
+    timer_msleep(200);
+  }
 }

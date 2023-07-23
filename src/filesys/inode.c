@@ -117,7 +117,7 @@ struct inode* inode_open(block_sector_t sector) {
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  buffer_read(inode->sector, &inode->data);
+  buffer_read(inode->sector, &inode->data, 0);
   return inode;
 }
 
@@ -252,7 +252,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
              we're writing, then we need to read in the sector
              first.  Otherwise we start with a sector of all zeros. */
       if (sector_ofs > 0 || chunk_size < sector_left) {
-        buffer_read(sector_idx, bounce);
+        buffer_read(sector_idx, bounce, 0);
       } else {
         memset(bounce, 0, BLOCK_SECTOR_SIZE);
       }
