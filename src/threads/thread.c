@@ -269,6 +269,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Add to run queue. */
   thread_unblock(t);
 
+  //p2-prior
+  if (active_sched_policy == SCHED_PRIO)
+    thread_yield();
+
   return tid;
 }
 
@@ -400,7 +404,10 @@ void thread_foreach(thread_action_func* func, void* aux) {
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void thread_set_priority(int new_priority) { thread_current()->priority = new_priority; }
+void thread_set_priority(int new_priority) { 
+  if (active_sched_policy == SCHED_PRIO) 
+  thread_current()->priority = new_priority; 
+}
 
 /* Returns the current thread's priority. */
 int thread_get_priority(void) { return thread_current()->priority; }
@@ -531,21 +538,31 @@ static struct thread* thread_schedule_fifo(void) {
     return idle_thread;
 }
 
-/* Strict priority scheduler */
-// p2-prior添加: 返回优先级最高的线程
-// TODO: 可以尝试在向列表插入线程时按顺序插入，调度时直接取最前\最后一个。
-static struct thread* thread_schedule_prio(void) {
-  if (!list_empty(&prior_ready_list)) {
+// p2-prior添加: 返回列表中优先级最高的线程
+struct thread* thread_with_highest_prior(struct list* list) {
+  if (!list_empty(list)) {
     struct list_elem* e;
     struct thread* t_max_prior = list_entry(
-      list_begin(&prior_ready_list), struct thread, elem);;
-    for (e = list_begin(&prior_ready_list); e != list_end(&prior_ready_list); 
+      list_begin(list), struct thread, elem);;
+    for (e = list_begin(list); e != list_end(list); 
     e = list_next(e)) {
       struct thread* t = list_entry(e, struct thread, elem);
       if (t->priority > t_max_prior->priority) {
         t_max_prior = t;
       }
     }
+    return t_max_prior;
+  }
+  else 
+    return NULL;
+}
+
+/* Strict priority scheduler */
+// p2-prior添加: 返回优先队列中优先级最高的线程
+// TODO: 可以尝试在向列表插入线程时按顺序插入，调度时直接取最前\最后一个。
+static struct thread* thread_schedule_prio(void) {
+  struct thread* t_max_prior = thread_with_highest_prior(&prior_ready_list);
+  if (t_max_prior != NULL) {
     list_remove(&t_max_prior->elem);
     return t_max_prior;
   }
