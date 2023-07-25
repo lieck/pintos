@@ -405,12 +405,27 @@ void thread_foreach(thread_action_func* func, void* aux) {
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) { 
-  if (active_sched_policy == SCHED_PRIO) 
-  thread_current()->priority = new_priority; 
+  struct thread* cur = thread_current();
+  switch (active_sched_policy) {
+    case SCHED_FIFO:
+      thread_current()->priority = new_priority; 
+      break;
+    case SCHED_PRIO:
+      if (new_priority >= cur->priority || cur->priority <= cur->base_priority) //说明此时该线程的优先级没有被贡献，可以修改。不然不许修改
+        cur->priority = new_priority;
+      cur->base_priority = new_priority;
+      if (cur != thread_with_highest_prior(&prior_ready_list))
+        thread_yield();
+      break;
+    default:
+      PANIC("Shouldn't reach here.");
+  }
 }
 
 /* Returns the current thread's priority. */
-int thread_get_priority(void) { return thread_current()->priority; }
+int thread_get_priority(void) { 
+  return thread_current()->priority; 
+}
 
 /* Sets the current thread's nice value to NICE. */
 void thread_set_nice(int nice UNUSED) { /* Not yet implemented. */
@@ -507,6 +522,8 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
+  t->base_priority = priority; //p2-prior添加
+  list_init(&t->holding_locks); //p2-prior添加
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
 

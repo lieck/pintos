@@ -195,6 +195,7 @@ void lock_acquire(struct lock* lock) {
   enum intr_level old_level;
   struct thread* cur = thread_current();
   old_level = intr_disable ();
+  
   switch (active_sched_policy) {
     case SCHED_FIFO:
       sema_down(&lock->semaphore);
@@ -208,6 +209,7 @@ void lock_acquire(struct lock* lock) {
         struct thread* t;
         while (l->holder->priority < cur->priority) {
           l->holder->priority = cur->priority;
+          l->max_priority = cur->priority; //该锁的最大优先级
           t = l->holder;
           l = t->waiting_lock;
           if (l == NULL)
@@ -216,7 +218,8 @@ void lock_acquire(struct lock* lock) {
         sema_down(&lock->semaphore); //开始等待
       }
       lock->holder = cur;
-      lock->old_priority = cur->priority; //记录获取锁时的优先级，用于被donate后恢复
+      list_push_back(&cur->holding_locks, &lock->elem);
+      lock->max_priority = cur->priority; //记录锁的最大优先级
       break;
     default:
       PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
@@ -250,6 +253,8 @@ bool lock_try_acquire(struct lock* lock) {
 void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
+  enum intr_level old_level;
+  old_level = intr_disable();
 
   switch (active_sched_policy) {
     case SCHED_FIFO:
@@ -259,17 +264,34 @@ void lock_release(struct lock* lock) {
     case SCHED_PRIO:
       // "如果该线程不再是最高优先级，必须立刻释放CPU！"
       // 如果该线程目前优先级不同于原优先级，则一定有更高优先级的线程在等待锁
+      
       lock->holder = NULL;
+      list_remove(&lock->elem);
       sema_up(&lock->semaphore);
-      if (thread_current()->priority != lock->old_priority) {
-        ASSERT(thread_current()->priority > lock->old_priority);
-        thread_current()->priority = lock->old_priority;
+      struct thread* cur = thread_current();
+      if (list_empty(&cur->holding_locks)) {
+        if (cur->priority != cur->base_priority) {
+          ASSERT(cur->priority > cur->base_priority);
+          cur->priority = cur->base_priority;
+          thread_yield();
+        }
+      } //TODO: 考虑一下是否需要屏蔽中断 TODO: 将这个if-else合成一个
+      else {
+        struct list_elem* e;
+        int max_lock_prior = -1;
+        for (e = list_begin(&cur->holding_locks); e != list_end(&cur->holding_locks); 
+        e = list_next(e)) {
+          struct lock* l = list_entry(e, struct lock, elem);
+          max_lock_prior = l->max_priority > max_lock_prior ? l->max_priority : max_lock_prior;
+        }
+        cur->priority = max_lock_prior > cur->base_priority ? max_lock_prior : cur->base_priority;
         thread_yield();
       }
       break;
     default:
       PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
   }
+  intr_set_level (old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false

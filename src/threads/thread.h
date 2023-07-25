@@ -90,6 +90,7 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
   int priority;              /* Priority. */
+  int base_priority;         // p2-prior添加
   struct list_elem allelem;  /* List element for all threads list. */
 
   /* Shared between thread.c and synch.c. */
@@ -109,8 +110,9 @@ struct thread {
 
   // p2-alarm: 记录被唤醒的时刻，默认赋值为0
   int wakeup_time; 
-  // p2-prior: 记录该线程正在等待的锁
-  struct lock* waiting_lock;
+  // p2-prior: 
+  struct lock* waiting_lock; //记录该线程正在等待的锁
+  struct list holding_locks; //线程拥有的锁
 };
 
 /* Types of scheduler that the user can request the kernel

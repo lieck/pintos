@@ -22,7 +22,8 @@ struct thread* next_waiter(struct list waiters);
 struct lock {
   struct thread* holder;      /* Thread holding lock (for debugging). */
   struct semaphore semaphore; /* Binary semaphore controlling access. */
-  int old_priority; //p2-prior添加：该线程获得锁时的优先级，用于恢复优先级
+  int max_priority; //p2-prior添加：该锁的最大优先级。如果lock->holder被donate，则这个值也改变。用于释放锁后的优先级恢复。
+  struct list_elem elem; //p2-prior添加：用于表示线程持有的所有锁的列表
 };
 
 void lock_init(struct lock*);
