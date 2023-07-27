@@ -244,7 +244,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   if(curr->pcb != NULL) {
     t->parent = curr;
     struct child_status* cs = malloc(sizeof(struct child_status));
-    cs->child = t;
+    cs->child_pcb = NULL;
     cs->tid = t->tid;
     cs->active = false;
     sema_init(&cs->sema, 0);
@@ -526,6 +526,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   list_init(&t->holding_locks); //p2-prior添加
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
+  t->stakc_idx = 1;
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
