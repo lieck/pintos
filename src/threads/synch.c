@@ -111,6 +111,8 @@ void sema_up(struct semaphore* sema) {
     break;
   case SCHED_PRIO: {
     sema->value++;
+    // TODO：将“取优先级最大的线程”的函数抽象为“取priority最大的list_elem”的函数
+    // 以适配所有需要找最大优先级元素的环境
     if (!list_empty(&sema->waiters)) {
       struct thread* t_max_prior = thread_with_highest_prior(&sema->waiters);
       list_remove(&t_max_prior->elem);
@@ -371,6 +373,7 @@ void rw_lock_release(struct rw_lock* rw_lock, bool reader) {
 struct semaphore_elem {
   struct list_elem elem;      /* List element. */
   struct semaphore semaphore; /* This semaphore. */
+  int priority; //p2-prior添加：线程的优先级
 };
 
 /* Initializes condition variable COND.  A condition variable
@@ -404,6 +407,7 @@ void cond_init(struct condition* cond) {
    we need to sleep. */
 void cond_wait(struct condition* cond, struct lock* lock) {
   struct semaphore_elem waiter;
+  waiter.priority = thread_get_priority();
 
   ASSERT(cond != NULL);
   ASSERT(lock != NULL);
@@ -430,8 +434,33 @@ void cond_signal(struct condition* cond, struct lock* lock UNUSED) {
   ASSERT(!intr_context());
   ASSERT(lock_held_by_current_thread(lock));
 
-  if (!list_empty(&cond->waiters))
-    sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+  //p2-prior修改 & 添加：适配优先级调度的条件变量唤醒方式
+  switch(active_sched_policy) {
+    case SCHED_FIFO:
+      if (!list_empty(&cond->waiters))
+        sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+      break;
+    case SCHED_PRIO: {
+      // TODO：将“取优先级最大的线程”的函数抽象为“取priority最大的list_elem”的函数
+      // 以适配所有需要找最大优先级元素的环境
+      if (!list_empty(&cond->waiters)) {
+        struct list_elem* e;
+        struct semaphore_elem* s_max_prior = list_entry(list_begin(&cond->waiters), struct semaphore_elem, elem);
+        for (e = list_begin(&cond->waiters); e != list_end(&cond->waiters); e = list_next(e)) {
+          struct semaphore_elem* s = list_entry(e, struct semaphore_elem, elem);
+          if (s->priority > s_max_prior->priority) {
+            s_max_prior = s;
+          }
+        }
+        sema_up(&s_max_prior->semaphore);
+        list_remove(s_max_prior);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
