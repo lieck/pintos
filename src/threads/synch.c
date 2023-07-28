@@ -107,12 +107,18 @@ void sema_up(struct semaphore* sema) {
   case SCHED_FIFO:
     if (!list_empty(&sema->waiters))
       thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+    sema->value++;
     break;
   case SCHED_PRIO: {
+    sema->value++;
     if (!list_empty(&sema->waiters)) {
       struct thread* t_max_prior = thread_with_highest_prior(&sema->waiters);
       list_remove(&t_max_prior->elem);
       thread_unblock(t_max_prior);
+      if (thread_current()->priority < t_max_prior->priority) {
+        if (!intr_context())
+          thread_yield();
+      }
     }
     break;
   }
@@ -120,7 +126,7 @@ void sema_up(struct semaphore* sema) {
       PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
   }
   // thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
-  sema->value++;
+  
   intr_set_level(old_level);
 }
 
