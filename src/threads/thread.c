@@ -29,6 +29,10 @@ static struct list fifo_ready_list;
 // p2-alarm添加：睡眠队列
 static struct list fifo_sleep_list;
 
+// p2-prior: 优先级队列
+static struct list prior_ready_list;
+
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -115,7 +119,10 @@ void thread_init(void) {
   list_init(&fifo_ready_list);
   list_init(&all_list);
   // p2-alarm: 添加睡眠队列的初始化
+  // TODO p2-alarm: 将调度任务交给函数来做，这样就不用对不同调度方案设置多个睡眠队列。
   list_init(&fifo_sleep_list);
+  // p2-prior: 添加优先级队列的初始化
+  list_init(&prior_ready_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread();
@@ -142,10 +149,10 @@ void thread_start(void) {
 // p2-alarm添加：唤醒线程
 // 检查当前ticks下是否有睡眠线程应当被唤醒
 void thread_wake(int64_t ticks) {
-  struct list_elem* e;
   if (list_empty(&fifo_sleep_list)) {
     return;
   }
+  struct list_elem* e;
   for (e = list_begin(&fifo_sleep_list); e != list_end(&fifo_sleep_list);
   e = list_next(e)) {
     struct thread* t = list_entry(e, struct thread, elem);
@@ -262,6 +269,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Add to run queue. */
   thread_unblock(t);
 
+  //p2-prior
+  if (active_sched_policy == SCHED_PRIO)
+    thread_yield();
+
   return tid;
 }
 
@@ -287,10 +298,22 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(is_thread(t));
 
-  if (active_sched_policy == SCHED_FIFO)
-    list_push_back(&fifo_ready_list, &t->elem);
-  else
-    PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
+// p2-prior添加：
+  switch (active_sched_policy) {
+    case SCHED_FIFO:
+      list_push_back(&fifo_ready_list, &t->elem);
+      break;
+    case SCHED_PRIO:
+      list_push_back(&prior_ready_list, &t->elem);
+      break;
+    default:
+      break;
+  }
+
+  // if (active_sched_policy == SCHED_FIFO)
+  //   list_push_back(&fifo_ready_list, &t->elem);
+  // else
+  //   PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -381,10 +404,28 @@ void thread_foreach(thread_action_func* func, void* aux) {
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void thread_set_priority(int new_priority) { thread_current()->priority = new_priority; }
+void thread_set_priority(int new_priority) { 
+  struct thread* cur = thread_current();
+  switch (active_sched_policy) {
+    case SCHED_FIFO:
+      thread_current()->priority = new_priority; 
+      break;
+    case SCHED_PRIO:
+      if (new_priority >= cur->priority || cur->priority <= cur->base_priority) //说明此时该线程的优先级没有被贡献，可以修改。不然不许修改
+        cur->priority = new_priority;
+      cur->base_priority = new_priority;
+      if (cur != thread_with_highest_prior(&prior_ready_list))
+        thread_yield();
+      break;
+    default:
+      PANIC("Shouldn't reach here.");
+  }
+}
 
 /* Returns the current thread's priority. */
-int thread_get_priority(void) { return thread_current()->priority; }
+int thread_get_priority(void) { 
+  return thread_current()->priority; 
+}
 
 /* Sets the current thread's nice value to NICE. */
 void thread_set_nice(int nice UNUSED) { /* Not yet implemented. */
@@ -481,6 +522,8 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
+  t->base_priority = priority; //p2-prior添加
+  list_init(&t->holding_locks); //p2-prior添加
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
   t->stakc_idx = 1;
@@ -505,15 +548,44 @@ static void* alloc_frame(struct thread* t, size_t size) {
 
 /* First-in first-out scheduler */
 static struct thread* thread_schedule_fifo(void) {
-  if (!list_empty(&fifo_ready_list))
-    return list_entry(list_pop_front(&fifo_ready_list), struct thread, elem);
+  if (!list_empty(&fifo_ready_list)) {
+    struct thread* t = list_entry(list_pop_front(&fifo_ready_list), struct thread, elem);
+    return t;
+  }
   else
     return idle_thread;
 }
 
+// p2-prior添加: 返回列表中优先级最高的线程
+struct thread* thread_with_highest_prior(struct list* list) {
+  if (!list_empty(list)) {
+    struct list_elem* e;
+    struct thread* t_max_prior = list_entry(
+      list_begin(list), struct thread, elem);;
+    for (e = list_begin(list); e != list_end(list); 
+    e = list_next(e)) {
+      struct thread* t = list_entry(e, struct thread, elem);
+      if (t->priority > t_max_prior->priority) {
+        t_max_prior = t;
+      }
+    }
+    return t_max_prior;
+  }
+  else 
+    return NULL;
+}
+
 /* Strict priority scheduler */
+// p2-prior添加: 返回优先队列中优先级最高的线程
+// TODO: 可以尝试在向列表插入线程时按顺序插入，调度时直接取最前\最后一个。
 static struct thread* thread_schedule_prio(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=prio\"");
+  struct thread* t_max_prior = thread_with_highest_prior(&prior_ready_list);
+  if (t_max_prior != NULL) {
+    list_remove(&t_max_prior->elem);
+    return t_max_prior;
+  }
+  else
+    return idle_thread;
 }
 
 /* Fair priority scheduler */
