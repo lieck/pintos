@@ -56,9 +56,6 @@ void init_buffer_cache(void) {
 
 /* 从缓存中读取 sectoc */
 void buffer_read(block_sector_t sector, void* buffer) {
-  block_read(fs_device, sector, buffer);
-  return;
-  
   lock_acquire(&buffer_lock);
 
   size_t idx;
@@ -75,7 +72,7 @@ void buffer_read(block_sector_t sector, void* buffer) {
   buffer_info[idx].use++;
   buffer_info[idx].reference = true;
 
-  // 如果正在预取, 则自选等待
+  // 如果正在预取, 则自旋等待
   while(buffer_info[idx].use > 1) {
     lock_release(&buffer_lock);
     timer_msleep(5);
@@ -101,9 +98,6 @@ void buffer_read(block_sector_t sector, void* buffer) {
 }
 
 void buffer_write(block_sector_t sector, const void* buffer) {
-  block_write(fs_device, sector, buffer);
-  return;
-
   lock_acquire(&buffer_lock);
   prefetching_add(sector);
 
@@ -134,7 +128,6 @@ void buffer_write(block_sector_t sector, const void* buffer) {
   }
 
   memcpy(&buffer_data[idx], buffer, BLOCK_SECTOR_SIZE);
-  block_write(fs_device, sector, buffer);
   buffer_info[idx].dirty = true;
 
   lock_acquire(&buffer_lock);
