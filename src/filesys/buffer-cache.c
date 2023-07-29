@@ -54,13 +54,12 @@ void init_buffer_cache(void) {
   prefetching_end = 0;
 }
 
-/* 从缓存中读取 sector, pf 为需要预取的 sector(不为0有效) */
-void buffer_read(block_sector_t sector, void* buffer, block_sector_t pf) {
+/* 从缓存中读取 sectoc */
+void buffer_read(block_sector_t sector, void* buffer) {
+  block_read(fs_device, sector, buffer);
+  return;
+  
   lock_acquire(&buffer_lock);
-
-  if(pf != 0) {
-    prefetching_add(pf);
-  }
 
   size_t idx;
   bool hit = get_buffer_idx(sector, &idx);
@@ -102,6 +101,9 @@ void buffer_read(block_sector_t sector, void* buffer, block_sector_t pf) {
 }
 
 void buffer_write(block_sector_t sector, const void* buffer) {
+  block_write(fs_device, sector, buffer);
+  return;
+
   lock_acquire(&buffer_lock);
   prefetching_add(sector);
 
