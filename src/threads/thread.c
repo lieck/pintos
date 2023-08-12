@@ -235,7 +235,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   // 添加 thread 到父进程中
   struct thread *curr = thread_current();
-  if(curr->pcb != NULL) {
+  if(curr->pcb != NULL) { /* 只有用户程序才会初始化 pcb */
     t->parent = curr;
     struct child_status* cs = malloc(sizeof(struct child_status));
     cs->child_pcb = NULL;
