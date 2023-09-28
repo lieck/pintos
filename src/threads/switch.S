@@ -36,8 +36,21 @@ switch_threads:
 	movl SWITCH_CUR(%esp), %eax
 	movl %esp, (%eax,%edx,1)
 
-	# Restore stack pointer from new thread's stack.
+	# Get offsetof (struct thread, fpu_buffer_).
+.globl thread_fpu_ofs
+	mov thread_fpu_ofs, %edx
+
+	# Save current fpu_environment old thread's fpu_buffer_, if any.
+	fsave (%eax,%edx,1)
+
+	# change to old thread
 	movl SWITCH_NEXT(%esp), %ecx
+
+	# Restore current fpu_environment old thread's fpu_buffer_, if any.
+	frstor (%ecx,%edx,1)
+
+	# Restore stack pointer from new thread's stack.
+	mov thread_stack_ofs, %edx
 	movl (%ecx,%edx,1), %esp
 
 	# Restore caller's register state.

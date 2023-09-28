@@ -8,6 +8,7 @@
 #include "devices/shutdown.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "float.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -62,6 +63,9 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_PRACTICE:
       check_num32(args + 1);
       f->eax = sys_practice(args[1]);
+      break;
+    case SYS_COMPUTE_E:
+      f->eax = sys_compute_e(args[1]);
       break;
     case SYS_HALT:
       sys_halt();
@@ -380,6 +384,10 @@ void sys_close(int fd) {
 
   list_remove(&f_info->elem);
   free(f_info);
+}
+
+double sys_compute_e(int n) {
+  return sys_sum_to_e(n);
 }
 
 /* 校验 args 是否正确 */

@@ -5,6 +5,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "float.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -563,6 +564,15 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->magic = THREAD_MAGIC;
   t->stakc_idx = 1;
 
+  /* init FPU */
+  {
+    fpu_reg_t temp_fpu_buffer;
+    fpu_stenv(&temp_fpu_buffer);
+    fpu_init();
+    fpu_stenv(&t->fpu_buffer_);
+    fpu_ldenv(&temp_fpu_buffer);
+  }
+
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
   intr_set_level(old_level);
@@ -727,3 +737,4 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
+uint32_t thread_fpu_ofs = offsetof(struct thread, fpu_buffer_);
