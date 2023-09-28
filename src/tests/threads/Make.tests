@@ -13,6 +13,8 @@ smfs-starve-0 smfs-starve-1 smfs-starve-2 smfs-starve-4 \
 smfs-starve-8 smfs-starve-16 smfs-starve-64 smfs-starve-256 \
 smfs-prio-change \
 smfs-hierarchy-16 smfs-hierarchy-32 smfs-hierarchy-64 \
+mlfqs-load-1 mlfqs-load-60 mlfqs-load-avg mlfqs-recent-1 \
+mlfqs-fair-2 mlfqs-fair-20 mlfqs-block mlfqs-nice-2 mlfqs-nice-10\
 )
 
 # Remove MLFQS tests for SU21

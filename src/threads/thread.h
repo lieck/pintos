@@ -91,6 +91,8 @@ struct thread {
   uint8_t* stack;            /* Saved stack pointer. */
   int priority;              /* Priority. */
   int base_priority;         // p2-prior添加
+  int nice;                  // p2-mlfqs/smfs添加
+  fixed_point_t recent_cpu;            // p2-mlfqs/smfs添加
   struct list_elem allelem;  /* List element for all threads list. */
 
   /* Shared between thread.c and synch.c. */
@@ -146,6 +148,10 @@ void thread_sleep(int64_t);
 // p2-prior添加：
 void thread_sema_schedule(struct thread*);
 struct thread* thread_with_highest_prior(struct list*);
+// p2-mlfqs添加：
+void thread_update_priority_mlfqs(void);
+void thread_update_load_avg(void);
+void thread_update_recent_cpu(void);
 
 void thread_block(void);
 void thread_unblock(struct thread*);

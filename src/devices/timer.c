@@ -7,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/fixed-point.h"
 
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -129,14 +130,11 @@ void timer_print_stats(void) { printf("Timer: %" PRId64 " ticks\n", timer_ticks(
 /* Timer interrupt handler. */
 static void timer_interrupt(struct intr_frame* args UNUSED) {
   ticks++;
-
   // p2-alarm添加：检查当前ticks下有无线程应被唤醒
-  enum intr_level old_level;
-  old_level = intr_disable();
+  // enum intr_level old_level;
+  // old_level = intr_disable();
   thread_wake(ticks);
-  intr_set_level(old_level);
-  // END
-
+  // intr_set_level(old_level);
   thread_tick();
 }
 
