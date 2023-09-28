@@ -1,20 +1,28 @@
 #include "filesys/filesys.h"
 #include <debug.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "buffer-cache.h"
+#include "stddef.h"
+#include "threads/thread.h"
 
 /* Partition that contains the file system. */
 struct block* fs_device;
 
 static void do_format(void);
+static void file_background(void* aux);
 
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
 void filesys_init(bool format) {
+  init_buffer_cache();
+
   fs_device = block_get_role(BLOCK_FILESYS);
   if (fs_device == NULL)
     PANIC("No file system device found, can't initialize file system.");
@@ -26,11 +34,16 @@ void filesys_init(bool format) {
     do_format();
 
   free_map_open();
+
+  thread_create("file-flush", PRI_DEFAULT - 1, file_background, NULL);
 }
 
 /* Shuts down the file system module, writing any unwritten data
    to disk. */
-void filesys_done(void) { free_map_close(); }
+void filesys_done(void) {
+  free_map_close();
+  buffer_flush_all();
+}
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
@@ -84,4 +97,13 @@ static void do_format(void) {
     PANIC("root directory creation failed");
   free_map_close();
   printf("done.\n");
+}
+
+static void file_background(void* aux) {
+  for(;;) {
+    int64_t curr_time = timer_ticks();
+
+    buffer_background_flush(curr_time);
+    timer_msleep(200);
+  }
 }

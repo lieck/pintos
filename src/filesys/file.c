@@ -1,5 +1,7 @@
 #include "filesys/file.h"
 #include <debug.h>
+#include <stdio.h>
+#include <string.h>
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 
@@ -76,6 +78,13 @@ off_t file_read_at(struct file* file, void* buffer, off_t size, off_t file_ofs) 
    Advances FILE's position by the number of bytes read. */
 off_t file_write(struct file* file, const void* buffer, off_t size) {
   off_t bytes_written = inode_write_at(file->inode, buffer, size, file->pos);
+
+  // void *check_buffer = malloc(size);
+  // memset(check_buffer, 0, size);
+  // inode_read_at(file->inode, check_buffer, bytes_written, file->pos);
+  // ASSERT(memcmp(buffer, check_buffer, size) == 0);
+  // free(check_buffer);
+
   file->pos += bytes_written;
   return bytes_written;
 }

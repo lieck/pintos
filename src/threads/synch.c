@@ -57,7 +57,6 @@ void sema_init(struct semaphore* sema, unsigned value) {
    thread will probably turn interrupts back on. */
 void sema_down(struct semaphore* sema) {
   enum intr_level old_level;
-
   ASSERT(sema != NULL);
   ASSERT(!intr_context());
 
@@ -92,6 +91,7 @@ bool sema_try_down(struct semaphore* sema) {
   return success;
 }
 
+// p2-prior修改
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
    and wakes up one thread of those waiting for SEMA, if any.
 
@@ -102,11 +102,36 @@ void sema_up(struct semaphore* sema) {
   ASSERT(sema != NULL);
 
   old_level = intr_disable();
-  if (!list_empty(&sema->waiters))
-    thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
-  sema->value++;
+  // p2-prior修改：
+  switch (active_sched_policy) {
+  case SCHED_FIFO:
+    if (!list_empty(&sema->waiters))
+      thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+    sema->value++;
+    break;
+  case SCHED_PRIO: case SCHED_FAIR: case SCHED_MLFQS: {
+    sema->value++;
+    // TODO：将“取优先级最大的线程”的函数抽象为“取priority最大的list_elem”的函数
+    // 以适配所有需要找最大优先级元素的环境
+    if (!list_empty(&sema->waiters)) {
+      struct thread* t_max_prior = thread_with_highest_prior(&sema->waiters);
+      list_remove(&t_max_prior->elem);
+      thread_unblock(t_max_prior);
+      if (thread_current()->priority < t_max_prior->priority) {
+        if (!intr_context())
+          thread_yield();
+      }
+    }
+    break;
+  }
+    default:
+      PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
+  }
+  // thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+  
   intr_set_level(old_level);
 }
+
 
 static void sema_test_helper(void* sema_);
 
@@ -173,9 +198,41 @@ void lock_acquire(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
-
-  sema_down(&lock->semaphore);
-  lock->holder = thread_current();
+  
+  //p2-prior修改 & 添加：priority donation
+  enum intr_level old_level;
+  struct thread* cur = thread_current();
+  old_level = intr_disable ();
+  
+  switch (active_sched_policy) {
+    case SCHED_FIFO:
+      sema_down(&lock->semaphore);
+      lock->holder = cur;
+      break;
+    case SCHED_PRIO: case SCHED_FAIR: case SCHED_MLFQS:
+      // p2-priority donation:
+      if (!sema_try_down(&lock->semaphore)) {
+        cur->waiting_lock = lock;
+        struct lock* l = lock;
+        struct thread* t;
+        while (l->holder->priority < cur->priority) {
+          l->holder->priority = cur->priority;
+          l->max_priority = cur->priority; //该锁的最大优先级
+          t = l->holder;
+          l = t->waiting_lock;
+          if (l == NULL)
+            break;
+        }
+        sema_down(&lock->semaphore); //开始等待
+      }
+      lock->holder = cur;
+      list_push_back(&cur->holding_locks, &lock->elem);
+      lock->max_priority = cur->priority; //记录锁的最大优先级
+      break;
+    default:
+      PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
+  }
+  intr_set_level (old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -204,9 +261,45 @@ bool lock_try_acquire(struct lock* lock) {
 void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
+  enum intr_level old_level;
+  old_level = intr_disable();
 
-  lock->holder = NULL;
-  sema_up(&lock->semaphore);
+  switch (active_sched_policy) {
+    case SCHED_FIFO:
+      lock->holder = NULL;
+      sema_up(&lock->semaphore);
+      break;
+    case SCHED_PRIO: case SCHED_FAIR: case SCHED_MLFQS:
+      // "如果该线程不再是最高优先级，必须立刻释放CPU！"
+      // 如果该线程目前优先级不同于原优先级，则一定有更高优先级的线程在等待锁
+      lock->holder = NULL;
+      list_remove(&lock->elem);
+      sema_up(&lock->semaphore);
+      struct thread* cur = thread_current();
+      if (list_empty(&cur->holding_locks)) {
+        if (cur->priority != cur->base_priority) {
+          if (active_sched_policy == SCHED_PRIO)
+            ASSERT(cur->priority > cur->base_priority);
+          cur->priority = cur->base_priority;
+          thread_yield();
+        }
+      } //TODO: 考虑一下是否需要屏蔽中断 TODO: 将这个if-else合成一个
+      else {
+        struct list_elem* e;
+        int max_lock_prior = -1;
+        for (e = list_begin(&cur->holding_locks); e != list_end(&cur->holding_locks); 
+        e = list_next(e)) {
+          struct lock* l = list_entry(e, struct lock, elem);
+          max_lock_prior = l->max_priority > max_lock_prior ? l->max_priority : max_lock_prior;
+        }
+        cur->priority = max_lock_prior > cur->base_priority ? max_lock_prior : cur->base_priority;
+        thread_yield();
+      }
+      break;
+    default:
+      PANIC("Shouldn't reach here for schedule policy FIFO and PRIO!");
+  }
+  intr_set_level (old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -280,6 +373,7 @@ void rw_lock_release(struct rw_lock* rw_lock, bool reader) {
 struct semaphore_elem {
   struct list_elem elem;      /* List element. */
   struct semaphore semaphore; /* This semaphore. */
+  int priority; //p2-prior添加：线程的优先级
 };
 
 /* Initializes condition variable COND.  A condition variable
@@ -313,6 +407,7 @@ void cond_init(struct condition* cond) {
    we need to sleep. */
 void cond_wait(struct condition* cond, struct lock* lock) {
   struct semaphore_elem waiter;
+  waiter.priority = thread_get_priority();
 
   ASSERT(cond != NULL);
   ASSERT(lock != NULL);
@@ -339,8 +434,33 @@ void cond_signal(struct condition* cond, struct lock* lock UNUSED) {
   ASSERT(!intr_context());
   ASSERT(lock_held_by_current_thread(lock));
 
-  if (!list_empty(&cond->waiters))
-    sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+  //p2-prior修改 & 添加：适配优先级调度的条件变量唤醒方式
+  switch(active_sched_policy) {
+    case SCHED_FIFO:
+      if (!list_empty(&cond->waiters))
+        sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+      break;
+    case SCHED_PRIO: case SCHED_FAIR:{
+      // TODO：将“取优先级最大的线程”的函数抽象为“取priority最大的list_elem”的函数
+      // 以适配所有需要找最大优先级元素的环境
+      if (!list_empty(&cond->waiters)) {
+        struct list_elem* e;
+        struct semaphore_elem* s_max_prior = list_entry(list_begin(&cond->waiters), struct semaphore_elem, elem);
+        for (e = list_begin(&cond->waiters); e != list_end(&cond->waiters); e = list_next(e)) {
+          struct semaphore_elem* s = list_entry(e, struct semaphore_elem, elem);
+          if (s->priority > s_max_prior->priority) {
+            s_max_prior = s;
+          }
+        }
+        sema_up(&s_max_prior->semaphore);
+        list_remove(s_max_prior);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by

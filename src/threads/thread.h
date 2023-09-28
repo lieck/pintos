@@ -91,6 +91,9 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
   int priority;              /* Priority. */
+  int base_priority;         // p2-prior添加
+  int nice;                  // p2-mlfqs/smfs添加
+  fixed_point_t recent_cpu;            // p2-mlfqs/smfs添加
   struct list_elem allelem;  /* List element for all threads list. */
 
   /* Shared between thread.c and synch.c. */
@@ -110,6 +113,10 @@ struct thread {
 
   // p2-alarm: 记录被唤醒的时刻，默认赋值为0
   int wakeup_time; 
+
+  // p2-prior: 
+  struct lock* waiting_lock; //记录该线程正在等待的锁
+  struct list holding_locks; //线程拥有的锁
 
   /* save FPU environment when switch context and thread */
   fpu_reg_t fpu_buffer_;
@@ -141,8 +148,15 @@ typedef void thread_func(void* aux);
 tid_t thread_create(const char* name, int priority, thread_func*, void*);
 
 // p2-alarm添加：
-void thread_wake(int64_t ticks);
-void thread_sleep(int64_t wakeup_time);
+void thread_wake(int64_t);
+void thread_sleep(int64_t);
+// p2-prior添加：
+void thread_sema_schedule(struct thread*);
+struct thread* thread_with_highest_prior(struct list*);
+// p2-mlfqs添加：
+void thread_update_priority_mlfqs(void);
+void thread_update_load_avg(void);
+void thread_update_recent_cpu(void);
 
 void thread_block(void);
 void thread_unblock(struct thread*);
