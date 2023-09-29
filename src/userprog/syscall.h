@@ -24,4 +24,11 @@ void sys_seek(int fd, unsigned position);
 unsigned sys_tell(int fd);
 void sys_close(int fd);
 
+/* p3 subfilesys */
+bool sys_isdir(const char* dir);
+int sys_inumber(int fd);
+bool sys_readdir(int fd, char* name);
+bool sys_chdir(const char* dir);
+bool sys_mkdir(const char* dir);
+
 #endif /* userprog/syscall.h */

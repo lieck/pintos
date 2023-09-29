@@ -161,6 +161,16 @@ static void start_process(void* file_name_) {
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+
+    /* init working directory */
+    if (t->parent->pcb->active_thread_cnt /* 为啥系统也有pcb */) {
+      if (!t->parent->pcb->working_directory_pt_) {
+        PANIC("no invalid working directory in pcb"); }
+      /* 子进程集成父进程的工作目录 */
+      t->pcb->working_directory_pt_ = dir_reopen(t->parent->pcb->working_directory_pt_);
+    } else {
+      t->pcb->working_directory_pt_ = dir_open_root();
+    }
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -381,6 +391,14 @@ void process_exit(int status) {
       struct pthread_synch_info* f_info = list_entry(iter, struct pthread_synch_info, elem);
       iter = list_remove(iter);
       free(f_info);
+    }
+  }
+
+  /* 释放工作目录 */
+  {
+    if (cur->pcb->working_directory_pt_) {
+      dir_close(cur->pcb->working_directory_pt_);
+      cur->pcb->working_directory_pt_ = NULL;
     }
   }
 

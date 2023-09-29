@@ -65,6 +65,8 @@ struct process {
   /* 文件相关变量 */
   int next_fd;         /* 下一个 fd */
   struct list fd_list; /* fd table */
+  /* 进程工作目录 */
+  struct dir* working_directory_pt_;
 
   struct list thread_list; /* 子进程 or 线程的链表 */
 

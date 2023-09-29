@@ -6,9 +6,13 @@
 #include <string.h>
 #include <syscall-nr.h>
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/free-map.h"
+#include "filesys/inode.h"
 #include "float.h"
+#include "stdbool.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -153,6 +157,33 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     break;
   case SYS_GET_TID:
       f->eax = thread_current()->tid;
+      break;
+  }
+
+  switch (args[0]) {
+    case SYS_CHDIR:
+      check_num32(args + 1);
+      check_str(args + 1);
+      f->eax = sys_chdir(args + 1);
+      break;
+    case SYS_MKDIR:
+      check_num32(args + 1);
+      check_str(args + 1);
+      f->eax = sys_mkdir((char*)args[1]);
+      break;
+    case SYS_ISDIR:
+      check_num32(args + 1);
+      check_str(args + 1);
+      f->eax = sys_isdir(args + 1);
+      break;
+    case SYS_INUMBER:
+      check_num32(args + 1);
+      f->eax = sys_inumber(args[1]);
+      break;
+    case SYS_READDIR:
+      check_num32(args + 1);
+      check_char_ptr(args + 2);
+      f->eax = sys_readdir(args[1], (char*)args[2]);
       break;
   }
 
@@ -388,6 +419,81 @@ void sys_close(int fd) {
 
 double sys_compute_e(int n) {
   return sys_sum_to_e(n);
+}
+
+static void find_dir_by_name(const char* dir_name, struct dir* dir) {
+  int dir_fd = sys_open(dir_name);
+  if (dir_fd == -1) {
+    dir = NULL; }
+  
+  int dir_inum = sys_inumber(dir_fd);
+
+  struct inode* dir_inode = inode_open(dir_inum);
+  if (!dir_inode) {
+    dir = NULL; }
+
+  dir = dir_open(dir_inode);
+}
+
+bool sys_isdir(const char* dir) {
+  struct dir* directory;
+  find_dir_by_name(dir, directory);
+  return directory != NULL;
+}
+
+bool sys_chdir(const char* dir) {
+  if (!dir || sys_isdir(dir)) {
+    return false; }
+
+  struct dir* directory;
+  find_dir_by_name(dir, directory);
+  if (!directory) {
+    return false; }
+
+  struct process* p = thread_current()->pcb;
+  p->working_directory_pt_ = directory;
+}
+
+int sys_inumber(int fd) {
+  struct process* p = thread_current()->pcb;
+  if (!p) {
+    return false; }
+
+  struct file_info* fd_info = get_fd(p, fd);
+  if (!fd_info) {
+    return -1; }
+
+  struct inode* fd_inode = file_get_inode(fd_info->file);
+  return inode_get_inumber(fd_inode);
+}
+
+bool sys_readdir(int fd, char* name) {
+  int dir_inum = sys_inumber(fd);
+
+  struct inode* dir_inode = inode_open(dir_inum);
+  if (!dir_inode) {
+    return false; }
+
+  struct dir* dir_pt = dir_open(dir_inode);
+  if (!dir_pt) {
+    return false; }
+
+  return dir_readdir(dir_pt, name);
+}
+
+bool sys_mkdir(const char* dir) {
+  struct dir* working_dir_pt = thread_current()->pcb->working_directory_pt_;
+  /* 解析路径 */
+
+  block_sector_t inode_sector = 0;
+  bool success = (free_map_allocate(1, &inode_sector)
+    && dir_create(inode_sector, 16));
+  if (!success && inode_sector != 0)
+    free_map_release(inode_sector, 1);
+
+  success = success && dir_add(working_dir_pt, dir, inode_sector);
+
+  return success;
 }
 
 /* 校验 args 是否正确 */
